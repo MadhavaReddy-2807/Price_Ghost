@@ -1,0 +1,37 @@
+{
+  "name": "price-ghost-server",
+  "version": "1.0.0",
+  "description": "Price Ghost Backend API and Scraper Poller Engine",
+  "type": "module",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
+    "seed": "node src/scripts/seed.js",
+    "test": "node src/test_verify.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "google-auth-library": "^9.15.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.9.5",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.16"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  },
+  "keywords": [
+    "price-tracker",
+    "express",
+    "scraper",
+    "cheerio",
+    "cron"
+  ],
+  "author": "",
+  "license": "MIT"
+}
