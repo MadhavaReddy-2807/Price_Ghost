@@ -15,31 +15,69 @@ import pollerRoutes from './routes/poller.js';
 const app = express();
 
 // Configure CORS for Web Dashboard and Chrome Extension
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps, curl, or extensions)
-      if (!origin) return callback(null, true);
+const allowedOriginsList = [
+  'https://price-ghost.netlify.app',
+  ...(ENV.CLIENT_URL ? ENV.CLIENT_URL.split(',').map((u) => u.trim().replace(/\/+$/, '')) : []),
+];
 
-      if (
-        origin === ENV.CLIENT_URL ||
-        origin === 'https://price-ghost.netlify.app' ||
-        origin.endsWith('.netlify.app') ||
-        origin.startsWith('chrome-extension://') ||
-        (ENV.NODE_ENV === 'development' && (origin.includes('localhost') || origin.includes('127.0.0.1')))
-      ) {
-        return callback(null, true);
-      }
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl, extension background service worker)
+    if (!origin) return callback(null, true);
 
-      if (ENV.NODE_ENV === 'development') {
-        return callback(null, true); // Permissive only in development
-      }
+    const cleanOrigin = origin.replace(/\/+$/, '');
 
-      return callback(new Error(`Origin ${origin} not allowed by CORS policy.`));
-    },
-    credentials: true,
-  })
-);
+    // 1. Explicitly configured client URLs
+    if (allowedOriginsList.includes(cleanOrigin)) {
+      return callback(null, true);
+    }
+
+    // 2. Allow Netlify production and deploy preview domains (*.netlify.app)
+    if (cleanOrigin.endsWith('.netlify.app')) {
+      return callback(null, true);
+    }
+
+    // 3. Allow Render cloud domains (*.onrender.com)
+    if (cleanOrigin.endsWith('.onrender.com')) {
+      return callback(null, true);
+    }
+
+    // 4. Allow Chrome Extension environments
+    if (cleanOrigin.startsWith('chrome-extension://')) {
+      return callback(null, true);
+    }
+
+    // 5. Allow localhost and 127.0.0.1 in development mode
+    if (
+      ENV.NODE_ENV === 'development' ||
+      cleanOrigin.includes('localhost') ||
+      cleanOrigin.includes('127.0.0.1')
+    ) {
+      return callback(null, true);
+    }
+
+    // Safely reject origin without throwing a 500 error
+    console.warn(`[CORS Blocked] Origin: ${origin}`);
+    return callback(null, false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: [
+    'Origin',
+    'X-Requested-With',
+    'Content-Type',
+    'Accept',
+    'Authorization',
+    'Cache-Control',
+    'Pragma',
+  ],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 86400, // 24 hours preflight cache
+};
+
+app.use(cors(corsOptions));
+// Handle preflight OPTIONS explicitly across all routes
+app.options('*', cors(corsOptions));
 
 app.use(express.json());
 
@@ -73,6 +111,11 @@ app.get('/api/health', (req, res) => {
 
 // Guard API endpoints when database is disconnected (prevents 10s buffering timeouts)
 app.use('/api', (req, res, next) => {
+  // Always let preflight OPTIONS through
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
+
   if (mongoose.connection.readyState !== 1) {
     return res.status(503).json({
       error: 'Database Unavailable',
