@@ -11,6 +11,7 @@ import userRoutes from './routes/user.js';
 import itemRoutes from './routes/items.js';
 import dashboardRoutes from './routes/dashboard.js';
 import pollerRoutes from './routes/poller.js';
+import healthRoutes from './routes/health.js';
 
 const app = express();
 
@@ -81,6 +82,18 @@ app.options('*', cors(corsOptions));
 
 app.use(express.json());
 
+// Health & Upstream Monitor Endpoints
+// (Mounted BEFORE rate limiters & database blocker so monitors are never throttled or blocked)
+app.use('/api/health', healthRoutes);
+app.use('/health', healthRoutes);
+app.use('/healthz', healthRoutes);
+app.get('/ping', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.status(200).json({ pong: true, timestamp: new Date().toISOString() });
+});
+
 // Apply sliding-window rate limiters
 const apiLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
@@ -96,25 +109,6 @@ const authLimiter = createRateLimiter({
 
 app.use('/api/', apiLimiter);
 app.use('/api/auth/', authLimiter);
-
-// Health Check Endpoint
-app.get('/api/health', (req, res) => {
-  // If database is disconnected, trigger an active reconnection in background
-  if (mongoose.connection.readyState !== 1) {
-    connectDB().catch(() => {});
-  }
-
-  res.json({
-    status: 'ok',
-    service: 'Price Ghost API',
-    timestamp: new Date().toISOString(),
-    environment: ENV.NODE_ENV,
-    port: ENV.PORT,
-    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    readyState: mongoose.connection.readyState,
-    dbTarget: getSanitizedUri(ENV.MONGODB_URI),
-  });
-});
 
 // Guard API endpoints when database is disconnected (prevents 10s buffering timeouts)
 app.use('/api', (req, res, next) => {
@@ -163,6 +157,7 @@ async function bootstrap() {
     console.log(`👻 Price Ghost API Server running on port ${ENV.PORT}`);
     console.log(`📡 URL: http://localhost:${ENV.PORT}`);
     console.log(`🩺 Health: http://localhost:${ENV.PORT}/api/health`);
+    console.log(`🩺 Upstream Monitor: http://localhost:${ENV.PORT}/api/health/upstream`);
     console.log(`======================================================\n`);
   });
 }

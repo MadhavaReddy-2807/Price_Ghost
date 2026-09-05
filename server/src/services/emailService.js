@@ -19,6 +19,38 @@ function getTransporter() {
 }
 
 /**
+ * Checks email service status and configuration for health monitoring.
+ * @param {boolean} [verify=false] - Whether to attempt SMTP handshake verification
+ * @returns {Promise<Object>}
+ */
+export async function checkEmailStatus(verify = false) {
+  const isConfigured = Boolean(ENV.SMTP_USER && ENV.SMTP_PASS);
+  const info = {
+    configured: isConfigured,
+    host: ENV.SMTP_HOST || 'smtp.gmail.com',
+    port: ENV.SMTP_PORT || 587,
+    mode: isConfigured ? 'smtp' : 'mock',
+    from: ENV.SMTP_FROM,
+    verified: null,
+  };
+
+  if (verify && isConfigured) {
+    try {
+      const client = getTransporter();
+      if (client) {
+        await client.verify();
+        info.verified = true;
+      }
+    } catch (err) {
+      info.verified = false;
+      info.error = err.message;
+    }
+  }
+
+  return info;
+}
+
+/**
  * Formats a number to Indian Rupee currency format (e.g. ₹24,990)
  * @param {number} amount 
  * @returns {string}

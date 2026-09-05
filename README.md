@@ -155,6 +155,18 @@ npm run dev
 ```
 *The API will be available at `http://localhost:5000`.* Verify via `http://localhost:5000/api/health`.
 
+#### 🩺 Health & Upstream Monitor Endpoints
+
+| Endpoint | Method | Purpose | Use Case |
+|---|---|---|---|
+| `/api/health` (or `/health`, `/healthz`) | `GET`, `HEAD` | Primary heartbeat & liveness | Uptime monitors (Render, UptimeRobot, Netlify proxy) |
+| `/api/health/upstream` (or `/health/upstream`) | `GET`, `HEAD` | Deep upstream dependency health check | Checks MongoDB latency, Poller status, Amazon/Flipkart/Myntra reachability, SMTP, & memory |
+| `/api/health/ready` (or `/health/ready`) | `GET`, `HEAD` | Cloud / K8s readiness probe | Returns 200 if DB connected, 503 if DB down |
+| `/api/health/live` (or `/health/live`) | `GET`, `HEAD` | Cloud / K8s liveness probe | Returns 200 if Node process is alive |
+| `/ping` (or `/api/health/ping`) | `GET`, `HEAD` | Ultra-lightweight ping | High-frequency ping (`{"pong": true}`) |
+
+> **Note:** Health routes bypass sliding-window rate limiters, emit strict anti-cache headers (`Cache-Control: no-cache`), and proactively trigger background MongoDB reconnect attempts when disconnected.
+
 ### 4. Start the Web Dashboard
 In a new terminal window:
 ```bash
