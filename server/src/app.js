@@ -23,6 +23,8 @@ app.use(
 
       if (
         origin === ENV.CLIENT_URL ||
+        origin === 'https://price-ghost.netlify.app' ||
+        origin.endsWith('.netlify.app') ||
         origin.startsWith('chrome-extension://') ||
         (ENV.NODE_ENV === 'development' && (origin.includes('localhost') || origin.includes('127.0.0.1')))
       ) {

@@ -22,7 +22,8 @@
     "http://localhost:5173/*",
     "http://127.0.0.1:5173/*",
     "http://localhost:3000/*",
-    "https://*.onrender.com/*"
+    "https://*.onrender.com/*",
+    "https://price-ghost.netlify.app/*"
   ],
   "background": {
     "service_worker": "src/background/index.js",
@@ -49,7 +50,8 @@
         "http://localhost:5173/*",
         "http://127.0.0.1:5173/*",
         "http://localhost:3000/*",
-        "https://*.onrender.com/*"
+        "https://*.onrender.com/*",
+        "https://price-ghost.netlify.app/*"
       ],
       "js": [
         "src/content/webBridge.js"

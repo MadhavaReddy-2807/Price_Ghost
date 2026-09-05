@@ -110,6 +110,8 @@ export default function Popup() {
         const tabs = await chrome.tabs.query({});
         const dashboardTab = tabs.find(t => t.url && (
           (WEB_URL && t.url.includes(WEB_URL)) ||
+          t.url.includes('price-ghost.netlify.app') ||
+          t.url.includes('netlify.app') ||
           t.url.includes('localhost:5173') || 
           t.url.includes('127.0.0.1:5173') || 
           t.url.includes('onrender.com') ||
