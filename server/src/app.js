@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import { ENV } from './config/env.js';
-import { connectDB } from './config/db.js';
+import { connectDB, getSanitizedUri } from './config/db.js';
 import { startPollerScheduler } from './services/poller.js';
 import { createRateLimiter } from './middleware/rateLimiter.js';
 
@@ -99,6 +99,11 @@ app.use('/api/auth/', authLimiter);
 
 // Health Check Endpoint
 app.get('/api/health', (req, res) => {
+  // If database is disconnected, trigger an active reconnection in background
+  if (mongoose.connection.readyState !== 1) {
+    connectDB().catch(() => {});
+  }
+
   res.json({
     status: 'ok',
     service: 'Price Ghost API',
@@ -106,6 +111,8 @@ app.get('/api/health', (req, res) => {
     environment: ENV.NODE_ENV,
     port: ENV.PORT,
     database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    readyState: mongoose.connection.readyState,
+    dbTarget: getSanitizedUri(ENV.MONGODB_URI),
   });
 });
 
