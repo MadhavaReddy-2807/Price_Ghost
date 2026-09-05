@@ -20,8 +20,18 @@ export default function InstallExtension() {
           Install the Chrome Extension
         </h1>
         <p className="mt-3 text-slate-600 text-base leading-relaxed">
-          Enable automatic, silent price tracking as you browse Amazon India, Flipkart, and Myntra.
+          Enable 1-click price tracking and instant drop notifications as you browse Amazon, Flipkart, and Myntra.
         </p>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+          <a
+            href="/price-ghost-extension.zip"
+            download="price-ghost-extension.zip"
+            className="inline-flex items-center px-6 py-3 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-sm rounded-xl shadow-md transition transform hover:-translate-y-0.5"
+          >
+            <Download className="w-4 h-4 mr-2" />
+            <span>Download Extension (.ZIP)</span>
+          </a>
+        </div>
       </div>
 
       {/* Step by Step Cards */}
@@ -31,12 +41,12 @@ export default function InstallExtension() {
           <div className="w-8 h-8 rounded-full bg-indigo-600 text-white font-bold text-sm flex items-center justify-center">
             1
           </div>
-          <h3 className="text-base font-bold text-slate-900">Locate Extension Build</h3>
+          <h3 className="text-base font-bold text-slate-900">Download & Extract ZIP</h3>
           <p className="text-sm text-slate-600 leading-relaxed">
-            The extension has already been pre-built into the project directory:
+            Download the pre-configured extension ZIP file above and extract it into a folder on your computer.
           </p>
           <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-indigo-700 break-all select-all">
-            D:\Projects\Price_Ghost\extension\dist
+            price-ghost-extension.zip → Extract All
           </div>
         </div>
 
