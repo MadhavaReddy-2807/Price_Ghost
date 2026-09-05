@@ -1,4 +1,5 @@
 import cron from 'node-cron';
+import mongoose from 'mongoose';
 import { ItemModel } from '../models/Item.js';
 import { UserModel } from '../models/User.js';
 import { scrapeProduct } from './scraper/index.js';
@@ -57,6 +58,17 @@ export function getCronExpression(intervalMinutes) {
  * @param {number} [options.itemDelayMs] - Delay between items in ms
  */
 export async function runPollerCycle(options = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    console.log(
+      `[Poller] ⚠️ Skipping cycle: MongoDB is not connected yet (readyState=${mongoose.connection.readyState}). Waiting for DB connection.`
+    );
+    return {
+      success: false,
+      isRunning: false,
+      message: 'MongoDB is not connected yet. Waiting for database connection.',
+    };
+  }
+
   if (isPollerRunning) {
     console.log(
       `[Poller] ⚠️ Previous cycle started at ${lastCycleStartedAt?.toISOString()} is still in progress. Skipping trigger.`
