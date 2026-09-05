@@ -17,10 +17,27 @@ export async function apiRequest(endpoint, options = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      ...options,
+      headers,
+    });
+  } catch (primaryErr) {
+    // If Render direct fails (network error, waking up, or DNS), try Netlify proxy fallback
+    if (!API_BASE_URL.includes('netlify.app')) {
+      try {
+        response = await fetch(`https://price-ghost.netlify.app/api${endpoint}`, {
+          ...options,
+          headers,
+        });
+      } catch {
+        throw primaryErr;
+      }
+    } else {
+      throw primaryErr;
+    }
+  }
 
   const data = await response.json().catch(() => ({}));
 

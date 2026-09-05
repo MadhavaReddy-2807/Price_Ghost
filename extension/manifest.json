@@ -23,6 +23,8 @@
     "http://127.0.0.1:5173/*",
     "http://localhost:3000/*",
     "https://*.onrender.com/*",
+    "https://price-ghost.onrender.com/*",
+    "https://*.netlify.app/*",
     "https://price-ghost.netlify.app/*"
   ],
   "background": {
@@ -51,6 +53,8 @@
         "http://127.0.0.1:5173/*",
         "http://localhost:3000/*",
         "https://*.onrender.com/*",
+        "https://price-ghost.onrender.com/*",
+        "https://*.netlify.app/*",
         "https://price-ghost.netlify.app/*"
       ],
       "js": [
