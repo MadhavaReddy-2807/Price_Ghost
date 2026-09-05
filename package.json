@@ -14,6 +14,7 @@
     "dev:extension": "npm --workspace=extension run dev",
     "start:server": "npm --workspace=server run start",
     "test:server": "npm --workspace=server run test",
+    "build": "npm --workspace=website run build",
     "build:extension": "npm --workspace=extension run build",
     "build:website": "npm --workspace=website run build",
     "seed": "npm --workspace=server run seed"

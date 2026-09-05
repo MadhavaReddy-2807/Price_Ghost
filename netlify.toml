@@ -1,0 +1,14 @@
+[build]
+  command = "npm --workspace=website run build"
+  publish = "website/dist"
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://price-ghost.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
