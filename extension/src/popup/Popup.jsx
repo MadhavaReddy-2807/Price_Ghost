@@ -12,19 +12,14 @@ import {
   CheckCircle,
   AlertCircle,
   Eye,
-  Plus,
-  Link as LinkIcon,
-  Zap,
 } from 'lucide-react';
 import {
   trackItem,
-  trackUrl,
   fetchTrackedItems,
   untrackItem,
   updateThreshold,
   fetchDashboardSummary,
   fetchCurrentUser,
-  triggerPoller,
 } from '../utils/api.js';
 import { getAuthToken, setAuthToken, clearAuth, getStorage, setStorage } from '../utils/storage.js';
 import { WEB_URL } from '../config/env.js';
@@ -44,13 +39,6 @@ export default function Popup() {
   const [trackingCurrent, setTrackingCurrent] = useState(false);
   const [currentTabThreshold, setCurrentTabThreshold] = useState(10);
 
-  // Manual URL modal state
-  const [showUrlModal, setShowUrlModal] = useState(false);
-  const [manualUrl, setManualUrl] = useState('');
-  const [manualUrlThreshold, setManualUrlThreshold] = useState(10);
-  const [trackingUrl, setTrackingUrl] = useState(false);
-  const [urlError, setUrlError] = useState('');
-
   // Threshold modal state
   const [editingItem, setEditingItem] = useState(null);
   const [customThreshold, setCustomThreshold] = useState(10);
@@ -60,8 +48,6 @@ export default function Popup() {
   const [syncMessage, setSyncMessage] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
   const [manualToken, setManualToken] = useState('');
-  const [pollingNow, setPollingNow] = useState(false);
-  const [pollFeedback, setPollFeedback] = useState('');
 
   useEffect(() => {
     initAuth();
@@ -234,26 +220,6 @@ export default function Popup() {
     }
   }
 
-  async function handleTriggerPoll() {
-    if (!token) return;
-    setPollingNow(true);
-    setPollFeedback('Checking prices for your items...');
-    try {
-      const res = await triggerPoller({ mode: 'user' });
-      if (res.success) {
-        setPollFeedback(res.message || `Checked ${res.itemsChecked || 0} item(s)!`);
-        await loadUserData(token);
-      } else {
-        setPollFeedback(res.message || 'Price check busy');
-      }
-    } catch (err) {
-      setPollFeedback(err.message || 'Failed to check prices');
-    } finally {
-      setPollingNow(false);
-      setTimeout(() => setPollFeedback(''), 5000);
-    }
-  }
-
   async function handleLogout() {
     await clearAuth();
     setToken(null);
@@ -296,27 +262,6 @@ export default function Popup() {
       alert('Track failed: ' + err.message);
     } finally {
       setTrackingCurrent(false);
-    }
-  }
-
-  async function handleTrackUrlSubmit(e) {
-    e.preventDefault();
-    if (!manualUrl.trim() || !token) return;
-    setTrackingUrl(true);
-    setUrlError('');
-    try {
-      await trackUrl({
-        url: manualUrl.trim(),
-        targetPercentageDrop: manualUrlThreshold,
-        baseline: 'initial',
-      });
-      setManualUrl('');
-      setShowUrlModal(false);
-      await loadUserData(token);
-    } catch (err) {
-      setUrlError(err.message || 'Failed to track product link');
-    } finally {
-      setTrackingUrl(false);
     }
   }
 
@@ -402,34 +347,6 @@ export default function Popup() {
         <div className="flex items-center space-x-1.5">
           {token && (
             <button
-              onClick={handleTriggerPoll}
-              disabled={pollingNow}
-              title="Poll live prices now for your tracked items"
-              className="px-2 py-1 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded-md transition text-xs font-semibold flex items-center space-x-1 disabled:opacity-50"
-            >
-              <Zap className={`w-3.5 h-3.5 ${pollingNow ? 'animate-bounce text-yellow-200' : ''}`} />
-              <span>{pollingNow ? 'Checking...' : 'Check Prices'}</span>
-            </button>
-          )}
-
-          {token && (
-            <button
-              onClick={() => {
-                setShowUrlModal(!showUrlModal);
-                setUrlError('');
-              }}
-              title="Track product manually by URL"
-              className={`px-2 py-1 rounded-md transition text-xs font-semibold flex items-center space-x-1 ${
-                showUrlModal ? 'bg-white text-indigo-700' : 'bg-white/15 hover:bg-white/25 text-white'
-              }`}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Track URL</span>
-            </button>
-          )}
-
-          {token && (
-            <button
               onClick={handleRefresh}
               disabled={refreshing}
               title="Refresh"
@@ -458,84 +375,6 @@ export default function Popup() {
           )}
         </div>
       </div>
-
-      {/* Live Poller Feedback Banner */}
-      {pollFeedback && (
-        <div className="bg-amber-50 border-b border-amber-200 text-amber-900 text-xs px-3 py-1.5 font-medium flex items-center justify-between animate-in fade-in">
-          <span className="flex items-center space-x-1.5">
-            <Zap className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-            <span>{pollFeedback}</span>
-          </span>
-          <button onClick={() => setPollFeedback('')} className="text-amber-700 font-bold ml-2 text-xs">
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* Manual Track by URL Panel */}
-      {showUrlModal && token && (
-        <div className="bg-slate-900 text-white p-3 border-b border-slate-700 shadow-md animate-in fade-in duration-200">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold flex items-center space-x-1 text-indigo-300">
-              <LinkIcon className="w-3.5 h-3.5" />
-              <span>Track Product Manually by URL</span>
-            </span>
-            <button
-              onClick={() => setShowUrlModal(false)}
-              className="text-slate-400 hover:text-white text-xs px-1"
-            >
-              ✕
-            </button>
-          </div>
-          <form onSubmit={handleTrackUrlSubmit} className="space-y-2">
-            <input
-              type="url"
-              placeholder="Paste Amazon, Flipkart, or Myntra product link..."
-              value={manualUrl}
-              onChange={(e) => setManualUrl(e.target.value)}
-              required
-              className="w-full px-2.5 py-1.5 text-xs text-slate-900 bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-400 font-sans"
-            />
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-[11px] text-slate-300">Target drop:</span>
-              <div className="flex space-x-1">
-                {[5, 10, 15, 20].map((pct) => (
-                  <button
-                    key={pct}
-                    type="button"
-                    onClick={() => setManualUrlThreshold(pct)}
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded border transition ${
-                      manualUrlThreshold === pct
-                        ? 'bg-indigo-500 text-white border-indigo-400'
-                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-                    }`}
-                  >
-                    {pct}%
-                  </button>
-                ))}
-              </div>
-            </div>
-            {urlError && <p className="text-[10px] text-rose-300 font-medium">{urlError}</p>}
-            <button
-              type="submit"
-              disabled={trackingUrl || !manualUrl.trim()}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-1.5 rounded-lg shadow-xs transition flex items-center justify-center space-x-1 disabled:opacity-50"
-            >
-              {trackingUrl ? (
-                <>
-                  <RefreshCw className="w-3 h-3 animate-spin" />
-                  <span>Scraping & Tracking...</span>
-                </>
-              ) : (
-                <>
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Track This URL</span>
-                </>
-              )}
-            </button>
-          </form>
-        </div>
-      )}
 
       {/* Main Body */}
       {loading ? (
@@ -768,7 +607,7 @@ export default function Popup() {
                 <ShoppingBag className="w-10 h-10 stroke-1 text-gray-300 mb-2" />
                 <p className="text-xs font-semibold text-gray-600">No tracked products yet</p>
                 <p className="text-[11px] text-gray-400 mt-1 max-w-[240px]">
-                  Use the "👻 Track Price" button on any shopping page, or click "Track URL" above to track products manually!
+                  Use the "👻 Track Price" button on any shopping page (Amazon, Flipkart, Myntra) to track products!
                 </p>
               </div>
             ) : (
