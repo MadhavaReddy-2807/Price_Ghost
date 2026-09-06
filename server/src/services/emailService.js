@@ -5,15 +5,38 @@ let transporter = null;
 
 function getTransporter() {
   if (!transporter && ENV.SMTP_USER && ENV.SMTP_PASS) {
-    transporter = nodemailer.createTransport({
-      host: ENV.SMTP_HOST,
-      port: ENV.SMTP_PORT,
-      secure: ENV.SMTP_PORT === 465,
-      auth: {
-        user: ENV.SMTP_USER,
-        pass: ENV.SMTP_PASS,
-      },
-    });
+    const cleanPass = String(ENV.SMTP_PASS).replace(/\s+/g, '');
+    const isGmail =
+      (ENV.SMTP_HOST && ENV.SMTP_HOST.includes('gmail')) ||
+      (ENV.SMTP_USER && ENV.SMTP_USER.includes('@gmail.com'));
+
+    const transportOptions = isGmail
+      ? {
+          service: 'gmail',
+          auth: {
+            user: ENV.SMTP_USER,
+            pass: cleanPass,
+          },
+          family: 4, // Force IPv4 to prevent IPv6 socket connection timeouts on cloud/Docker hosts
+          connectionTimeout: 15000,
+          greetingTimeout: 15000,
+          socketTimeout: 20000,
+        }
+      : {
+          host: ENV.SMTP_HOST || 'smtp.gmail.com',
+          port: parseInt(ENV.SMTP_PORT || '587', 10),
+          secure: parseInt(ENV.SMTP_PORT, 10) === 465,
+          auth: {
+            user: ENV.SMTP_USER,
+            pass: cleanPass,
+          },
+          family: 4,
+          connectionTimeout: 15000,
+          greetingTimeout: 15000,
+          socketTimeout: 20000,
+        };
+
+    transporter = nodemailer.createTransport(transportOptions);
   }
   return transporter;
 }
