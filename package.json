@@ -17,6 +17,7 @@
     "build": "npm --workspace=website run build && node -e \"require('fs').cpSync('website/dist', 'dist', {recursive: true})\"",
     "build:extension": "npm --workspace=extension run build",
     "build:website": "npm --workspace=website run build",
+    "simulate:drop": "npm --workspace=server run simulate:drop",
     "seed": "npm --workspace=server run seed"
   },
   "keywords": [
