@@ -1,6 +1,12 @@
 import { UserModel } from '../models/User.js';
 import { sendPriceDropEmail } from './emailService.js';
 
+const activeUserLocks = new Set();
+let activeQueueWorkerInterval = null;
+let isQueueWorkerRunning = false;
+let queueWorkerIntervalMs = 60000; // Default frequency: every 60 seconds (1 minute)
+let lastQueueWorkerRunAt = null;
+
 /**
  * Adds an email notification to a user's persistent mail queue.
  * @param {string|import('mongoose').Types.ObjectId} userId
@@ -8,6 +14,7 @@ import { sendPriceDropEmail } from './emailService.js';
  * @param {'price_drop_alert'|'welcome'|'system'} [options.type='price_drop_alert']
  * @param {string} options.subject
  * @param {Object} options.payload
+ * @param {boolean} [options.force=false]
  * @returns {Promise<Object>} Created or updated mail queue item
  */
 export async function enqueueUserEmail(userId, { type = 'price_drop_alert', subject, payload = {}, force = false }) {
@@ -21,21 +28,21 @@ export async function enqueueUserEmail(userId, { type = 'price_drop_alert', subj
     return null;
   }
 
-  // Deduplicate 1: If an alert for the same product is already pending, update its payload
-  const existingPending = user.mailQueue.find(
+  // Deduplicate 1: If an alert for the same product is already pending or processing, update its payload
+  const existingActive = user.mailQueue.find(
     (job) =>
-      job.status === 'pending' &&
+      (job.status === 'pending' || job.status === 'processing') &&
       job.payload?.itemId &&
       job.payload.itemId.toString() === payload.itemId?.toString()
   );
 
-  if (existingPending) {
-    existingPending.subject = subject || existingPending.subject;
-    existingPending.payload = { ...existingPending.payload.toObject?.() || existingPending.payload, ...payload };
-    existingPending.queuedAt = new Date();
+  if (existingActive) {
+    existingActive.subject = subject || existingActive.subject;
+    existingActive.payload = { ...(existingActive.payload.toObject?.() || existingActive.payload), ...payload };
+    existingActive.queuedAt = new Date();
     await user.save();
-    console.log(`[Mail Queue] 🔄 Updated existing pending queue item for ${user.email}: "${subject}"`);
-    return existingPending;
+    console.log(`[Mail Queue] 🔄 Updated existing ${existingActive.status} queue item for ${user.email}: "${subject}"`);
+    return existingActive;
   }
 
   // Deduplicate 2: Check tracking record's lastNotifiedPrice - avoid duplicate if currentPrice >= lastNotifiedPrice
@@ -51,19 +58,17 @@ export async function enqueueUserEmail(userId, { type = 'price_drop_alert', subj
     }
   }
 
-  // Deduplicate 3: Check if identical alert was already sent within the last 24 hours
-  const recentSent = user.mailQueue.find(
+  // Deduplicate 3: Check if an identical alert was already sent at this price or lower
+  const identicalSent = user.mailQueue.find(
     (job) =>
       job.status === 'sent' &&
       job.payload?.itemId &&
       job.payload.itemId.toString() === payload.itemId?.toString() &&
-      job.payload.currentPrice === payload.currentPrice &&
-      job.sentAt &&
-      (Date.now() - new Date(job.sentAt).getTime()) < 24 * 60 * 60 * 1000
+      job.payload.currentPrice <= payload.currentPrice
   );
-  if (!force && recentSent) {
+  if (!force && identicalSent) {
     console.log(
-      `[Mail Queue] 🛑 Duplicate prevented: identical alert already sent to ${user.email} within 24h at ₹${payload.currentPrice}`
+      `[Mail Queue] 🛑 Duplicate prevented: alert already sent to ${user.email} at ₹${identicalSent.payload?.currentPrice} for item ${payload.itemId}`
     );
     return null;
   }
@@ -112,115 +117,145 @@ export async function enqueueUserEmail(userId, { type = 'price_drop_alert', subj
  * @returns {Promise<{ processed: number, sent: number, failed: number }>}
  */
 export async function processUserMailQueue(userId) {
-  const user = await UserModel.findById(userId);
-  if (!user) {
+  const lockKey = userId.toString();
+  if (activeUserLocks.has(lockKey)) {
+    console.log(`[Mail Queue] ⏳ Queue already being processed for user ${lockKey}, skipping concurrent run.`);
     return { processed: 0, sent: 0, failed: 0 };
   }
 
-  if (user.notifications?.email === false) {
-    return { processed: 0, sent: 0, failed: 0 };
-  }
+  activeUserLocks.add(lockKey);
 
-  const pendingJobs = user.mailQueue.filter((job) => job.status === 'pending');
-  if (pendingJobs.length === 0) {
-    return { processed: 0, sent: 0, failed: 0 };
-  }
+  try {
+    const user = await UserModel.findById(userId);
+    if (!user) {
+      return { processed: 0, sent: 0, failed: 0 };
+    }
 
-  console.log(`[Mail Queue] 🚀 Processing ${pendingJobs.length} pending email(s) for ${user.email}...`);
+    if (user.notifications?.email === false) {
+      return { processed: 0, sent: 0, failed: 0 };
+    }
 
-  let sentCount = 0;
-  let failedCount = 0;
+    const pendingJobs = user.mailQueue.filter((job) => job.status === 'pending');
+    if (pendingJobs.length === 0) {
+      return { processed: 0, sent: 0, failed: 0 };
+    }
 
-  for (const job of pendingJobs) {
-    job.status = 'processing';
-    job.attempts = (job.attempts || 0) + 1;
+    console.log(`[Mail Queue] 🚀 Processing ${pendingJobs.length} pending email(s) for ${user.email}...`);
 
-    try {
-      if (job.type === 'price_drop_alert') {
-        // In-flight deduplication: verify that an alert hasn't already been sent at this price or lower within 1h
-        const trackingCheck = user.trackedItems.find(
-          (t) => t.itemId?.toString() === job.payload?.itemId?.toString()
-        );
-        if (
-          trackingCheck &&
-          trackingCheck.lastNotifiedPrice !== undefined &&
-          trackingCheck.lastNotifiedPrice !== null &&
-          job.payload?.currentPrice >= trackingCheck.lastNotifiedPrice &&
-          trackingCheck.lastNotifiedAt &&
-          (Date.now() - new Date(trackingCheck.lastNotifiedAt).getTime()) < 60 * 60 * 1000
-        ) {
-          console.log(
-            `[Mail Queue] 🛑 Duplicate suppressed for ${user.email}: price ₹${job.payload?.currentPrice} >= lastNotifiedPrice ₹${trackingCheck.lastNotifiedPrice}`
-          );
-          job.status = 'sent';
-          job.sentAt = new Date();
-          job.messageId = 'SUPPRESSED_DUPLICATE';
-          job.lastError = 'Duplicate email suppressed: price not lower than last notified';
-          continue;
-        }
+    let sentCount = 0;
+    let failedCount = 0;
 
-        const emailResult = await sendPriceDropEmail({
-          user: { name: user.name, email: user.email },
-          item: {
-            _id: job.payload.itemId,
-            title: job.payload.itemTitle,
-            url: job.payload.itemUrl,
-            imageUrl: job.payload.itemImage,
-            platform: job.payload.platform,
-          },
-          dropPercentage: job.payload.dropPercentage,
-          baselinePrice: job.payload.baselinePrice,
-          currentPrice: job.payload.currentPrice,
-          savings: job.payload.savings,
-        });
+    for (const job of pendingJobs) {
+      job.status = 'processing';
+      job.attempts = (job.attempts || 0) + 1;
 
-        if (emailResult && emailResult.success) {
-          job.status = 'sent';
-          job.sentAt = new Date();
-          job.messageId = emailResult.messageId || 'MOCKED';
-          job.lastError = null;
-          sentCount++;
-
-          // Update user's tracking record accordingly
-          const tracking = user.trackedItems.find(
+      try {
+        if (job.type === 'price_drop_alert') {
+          // In-flight deduplication 1: verify that currentPrice is strictly lower than lastNotifiedPrice
+          const trackingCheck = user.trackedItems.find(
             (t) => t.itemId?.toString() === job.payload?.itemId?.toString()
           );
-          if (tracking) {
-            tracking.lastNotifiedAt = new Date();
-            tracking.lastNotifiedPrice = job.payload.currentPrice;
+          if (
+            trackingCheck &&
+            trackingCheck.lastNotifiedPrice !== undefined &&
+            trackingCheck.lastNotifiedPrice !== null &&
+            job.payload?.currentPrice >= trackingCheck.lastNotifiedPrice
+          ) {
+            console.log(
+              `[Mail Queue] 🛑 Duplicate suppressed for ${user.email}: price ₹${job.payload?.currentPrice} >= lastNotifiedPrice ₹${trackingCheck.lastNotifiedPrice}`
+            );
+            job.status = 'sent';
+            job.sentAt = new Date();
+            job.messageId = 'SUPPRESSED_DUPLICATE';
+            job.lastError = 'Duplicate email suppressed: price not lower than last notified';
+            continue;
           }
 
-          console.log(
-            `[Mail Queue] ✅ Sent "${job.subject}" to ${user.email} (Message ID: ${job.messageId})`
+          // In-flight deduplication 2: verify no previously sent queue entry exists at same or lower price
+          const alreadySent = user.mailQueue.find(
+            (j) =>
+              j._id.toString() !== job._id.toString() &&
+              j.status === 'sent' &&
+              j.payload?.itemId?.toString() === job.payload?.itemId?.toString() &&
+              j.payload?.currentPrice <= job.payload?.currentPrice
+          );
+
+          if (alreadySent) {
+            console.log(
+              `[Mail Queue] 🛑 Duplicate suppressed for ${user.email}: alert already sent at ₹${alreadySent.payload?.currentPrice}`
+            );
+            job.status = 'sent';
+            job.sentAt = new Date();
+            job.messageId = 'SUPPRESSED_DUPLICATE';
+            job.lastError = 'Duplicate email suppressed: item already alerted at this price or lower';
+            continue;
+          }
+
+          const emailResult = await sendPriceDropEmail({
+            user: { name: user.name, email: user.email },
+            item: {
+              _id: job.payload.itemId,
+              title: job.payload.itemTitle,
+              url: job.payload.itemUrl,
+              imageUrl: job.payload.itemImage,
+              platform: job.payload.platform,
+            },
+            dropPercentage: job.payload.dropPercentage,
+            baselinePrice: job.payload.baselinePrice,
+            currentPrice: job.payload.currentPrice,
+            savings: job.payload.savings,
+          });
+
+          if (emailResult && emailResult.success) {
+            job.status = 'sent';
+            job.sentAt = new Date();
+            job.messageId = emailResult.messageId || 'MOCKED';
+            job.lastError = null;
+            sentCount++;
+
+            // Update user's tracking record accordingly
+            const tracking = user.trackedItems.find(
+              (t) => t.itemId?.toString() === job.payload?.itemId?.toString()
+            );
+            if (tracking) {
+              tracking.lastNotifiedAt = new Date();
+              tracking.lastNotifiedPrice = job.payload.currentPrice;
+            }
+
+            console.log(
+              `[Mail Queue] ✅ Sent "${job.subject}" to ${user.email} (Message ID: ${job.messageId})`
+            );
+          } else {
+            throw new Error(emailResult?.error || 'Email delivery failed');
+          }
+        } else {
+          // Generic or system mail
+          job.status = 'sent';
+          job.sentAt = new Date();
+          sentCount++;
+        }
+      } catch (err) {
+        failedCount++;
+        job.lastError = err.message;
+        if (job.attempts >= (job.maxAttempts || 3)) {
+          job.status = 'failed';
+          console.error(
+            `[Mail Queue] ❌ Delivery permanently failed for ${user.email} after ${job.attempts} attempts: ${err.message}`
           );
         } else {
-          throw new Error(emailResult?.error || 'Email delivery failed');
+          job.status = 'pending'; // Leave pending for retry
+          console.warn(
+            `[Mail Queue] ⚠️ Delivery deferred for ${user.email} (Attempt ${job.attempts}/${job.maxAttempts}): ${err.message}`
+          );
         }
-      } else {
-        // Generic or system mail
-        job.status = 'sent';
-        job.sentAt = new Date();
-        sentCount++;
-      }
-    } catch (err) {
-      failedCount++;
-      job.lastError = err.message;
-      if (job.attempts >= (job.maxAttempts || 3)) {
-        job.status = 'failed';
-        console.error(
-          `[Mail Queue] ❌ Delivery permanently failed for ${user.email} after ${job.attempts} attempts: ${err.message}`
-        );
-      } else {
-        job.status = 'pending'; // Leave pending for retry
-        console.warn(
-          `[Mail Queue] ⚠️ Delivery deferred for ${user.email} (Attempt ${job.attempts}/${job.maxAttempts}): ${err.message}`
-        );
       }
     }
-  }
 
-  await user.save();
-  return { processed: pendingJobs.length, sent: sentCount, failed: failedCount };
+    await user.save();
+    return { processed: pendingJobs.length, sent: sentCount, failed: failedCount };
+  } finally {
+    activeUserLocks.delete(lockKey);
+  }
 }
 
 /**
@@ -314,4 +349,84 @@ export async function retryFailedUserQueue(userId, queueItemId = null) {
   }
 
   return { resetCount: 0, processed: 0, sent: 0, failed: 0 };
+}
+
+/**
+ * Starts the lightweight background Mail Queue Worker.
+ * Periodically sweeps for pending email jobs and delivers them quickly.
+ *
+ * @param {number} [intervalMs=60000] Interval in milliseconds (default: 60s)
+ */
+export function startMailQueueWorker(intervalMs = 60000) {
+  if (activeQueueWorkerInterval) {
+    clearInterval(activeQueueWorkerInterval);
+  }
+
+  queueWorkerIntervalMs = Math.max(5000, intervalMs);
+  console.log(
+    `[Mail Queue Worker] 🚀 Background worker active (Checking every ${queueWorkerIntervalMs / 1000}s)`
+  );
+
+  activeQueueWorkerInterval = setInterval(async () => {
+    if (isQueueWorkerRunning) return;
+    isQueueWorkerRunning = true;
+    lastQueueWorkerRunAt = new Date();
+
+    try {
+      await processAllPendingMailQueues();
+    } catch (err) {
+      console.error('[Mail Queue Worker Error]', err.message);
+    } finally {
+      isQueueWorkerRunning = false;
+    }
+  }, queueWorkerIntervalMs);
+
+  if (activeQueueWorkerInterval.unref) {
+    activeQueueWorkerInterval.unref();
+  }
+}
+
+/**
+ * Stops the background Mail Queue Worker.
+ */
+export function stopMailQueueWorker() {
+  if (activeQueueWorkerInterval) {
+    clearInterval(activeQueueWorkerInterval);
+    activeQueueWorkerInterval = null;
+    console.log('[Mail Queue Worker] ⏹️ Stopped background worker.');
+  }
+}
+
+/**
+ * Returns current status of the Mail Queue Worker.
+ */
+export function getMailQueueWorkerStatus() {
+  return {
+    isRunning: isQueueWorkerRunning,
+    intervalMs: queueWorkerIntervalMs,
+    intervalSeconds: queueWorkerIntervalMs / 1000,
+    hasActiveTimer: !!activeQueueWorkerInterval,
+    lastRunAt: lastQueueWorkerRunAt,
+  };
+}
+
+/**
+ * Dynamically updates Mail Queue Worker frequency and enabled status.
+ *
+ * @param {Object} options
+ * @param {number} [options.intervalMs]
+ * @param {boolean} [options.enabled]
+ */
+export function updateMailQueueWorkerConfig({ intervalMs, enabled }) {
+  if (typeof intervalMs === 'number' && intervalMs >= 5000) {
+    queueWorkerIntervalMs = intervalMs;
+  }
+
+  if (enabled === false) {
+    stopMailQueueWorker();
+  } else if (enabled === true || (enabled === undefined && activeQueueWorkerInterval)) {
+    startMailQueueWorker(queueWorkerIntervalMs);
+  }
+
+  return getMailQueueWorkerStatus();
 }

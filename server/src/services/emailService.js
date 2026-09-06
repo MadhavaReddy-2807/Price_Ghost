@@ -214,10 +214,10 @@ export async function sendPriceDropEmail({
 
   const mailClient = getTransporter();
 
-  if (!mailClient) {
+  if (!mailClient || user.email?.endsWith('.test') || user.email?.endsWith('.example') || ENV.NODE_ENV === 'test') {
     // Development fallback mock mode
     console.log(`\n======================================================`);
-    console.log(`[EMAIL MOCK - NO SMTP CONFIGURED]`);
+    console.log(`[EMAIL MOCK - DEV/TEST MODE]`);
     console.log(`To: ${user.email}`);
     console.log(`Subject: ${subject}`);
     console.log(`Product: ${item.title}`);
@@ -225,7 +225,7 @@ export async function sendPriceDropEmail({
     console.log(`Savings: ${formatINR(savings)}`);
     console.log(`Buy Link: ${item.url}`);
     console.log(`======================================================\n`);
-    return { success: true, mocked: true };
+    return { success: true, mocked: true, messageId: `mock_${Date.now()}` };
   }
 
   try {

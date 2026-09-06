@@ -4,6 +4,11 @@ import { UserModel } from '../models/User.js';
 import { ItemModel } from '../models/Item.js';
 import { SystemSettingModel } from '../models/SystemSetting.js';
 import { getPollerStatus, updatePollerConfig, runPollerCycle } from '../services/poller.js';
+import {
+  getMailQueueWorkerStatus,
+  updateMailQueueWorkerConfig,
+  processAllPendingMailQueues,
+} from '../services/mailQueueService.js';
 
 const router = Router();
 
@@ -334,6 +339,114 @@ router.post('/poller/trigger', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to trigger poller cycle', details: error.message });
+  }
+});
+
+/**
+ * GET /api/admin/mail-queue
+ * Live status of the mail queue worker, aggregation of pending/sent items, and persisted configuration.
+ */
+router.get('/mail-queue', async (req, res) => {
+  try {
+    const workerStatus = getMailQueueWorkerStatus();
+    const persisted = await SystemSettingModel.findOne({ key: 'mailQueueConfig' });
+
+    // Aggregate counts across all users
+    const [pendingCount, usersWithPending] = await Promise.all([
+      UserModel.aggregate([
+        { $unwind: '$mailQueue' },
+        { $match: { 'mailQueue.status': 'pending' } },
+        { $count: 'pending' },
+      ]),
+      UserModel.countDocuments({ 'mailQueue.status': 'pending' }),
+    ]);
+
+    return res.json({
+      success: true,
+      worker: workerStatus,
+      persistedConfig: persisted?.value || null,
+      stats: {
+        pendingJobs: pendingCount[0]?.pending || 0,
+        usersWithPending,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to get mail queue information', details: error.message });
+  }
+});
+
+/**
+ * POST /api/admin/mail-queue/config
+ * Updates the frequency and active state of the background mail queue worker.
+ * Body:
+ *   - enabled: boolean (optional)
+ *   - intervalSeconds: number (optional, e.g. 30, 60, 120, 300)
+ *   - intervalMs: number (optional)
+ */
+router.post('/mail-queue/config', async (req, res) => {
+  try {
+    const { enabled, intervalSeconds, intervalMs } = req.body || {};
+
+    const targetMs = typeof intervalMs === 'number'
+      ? intervalMs
+      : typeof intervalSeconds === 'number'
+      ? intervalSeconds * 1000
+      : undefined;
+
+    const updatedWorker = updateMailQueueWorkerConfig({
+      enabled: typeof enabled === 'boolean' ? enabled : undefined,
+      intervalMs: targetMs,
+    });
+
+    // Persist configuration in MongoDB SystemSetting
+    await SystemSettingModel.findOneAndUpdate(
+      { key: 'mailQueueConfig' },
+      {
+        key: 'mailQueueConfig',
+        value: {
+          enabled: updatedWorker.hasActiveTimer,
+          intervalMs: updatedWorker.intervalMs,
+          intervalSeconds: updatedWorker.intervalSeconds,
+          updatedAt: new Date(),
+        },
+        description: 'Global mail queue background worker configuration',
+        updatedBy: req.user.email || 'admin',
+      },
+      { upsert: true, new: true }
+    );
+
+    console.log(
+      `[Admin] Mail Queue Worker configured by ${req.user.email}: enabled=${updatedWorker.hasActiveTimer}, interval=${updatedWorker.intervalSeconds}s`
+    );
+
+    return res.json({
+      success: true,
+      worker: updatedWorker,
+      message: updatedWorker.hasActiveTimer
+        ? `Mail queue worker checking frequency set to every ${updatedWorker.intervalSeconds}s.`
+        : 'Mail queue background worker paused.',
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to configure mail queue worker', details: error.message });
+  }
+});
+
+/**
+ * POST /api/admin/mail-queue/flush
+ * Manually sweep and deliver all pending mail queue items immediately.
+ */
+router.post('/mail-queue/flush', async (req, res) => {
+  try {
+    console.log(`[Admin] Mail queue sweep manually triggered by admin ${req.user.email}`);
+    const result = await processAllPendingMailQueues();
+
+    return res.json({
+      success: true,
+      result,
+      message: `Mail queue swept: processed ${result.totalProcessed} email(s) across ${result.totalUsers} user(s). Sent: ${result.totalSent}, Failed: ${result.totalFailed}.`,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to process mail queue', details: error.message });
   }
 });
 

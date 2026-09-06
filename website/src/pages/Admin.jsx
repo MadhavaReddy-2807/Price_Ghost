@@ -43,6 +43,15 @@ export default function Admin() {
   const [triggeringPoller, setTriggeringPoller] = useState(false);
   const [lastCycleResult, setLastCycleResult] = useState(null);
 
+  // Mail queue state
+  const [mailQueueConfig, setMailQueueConfig] = useState({
+    enabled: true,
+    intervalSeconds: 60,
+  });
+  const [mailQueueStats, setMailQueueStats] = useState(null);
+  const [savingMailQueue, setSavingMailQueue] = useState(false);
+  const [flushingMailQueue, setFlushingMailQueue] = useState(false);
+
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
@@ -51,10 +60,11 @@ export default function Admin() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [statsRes, usersRes, pollerRes] = await Promise.all([
+      const [statsRes, usersRes, pollerRes, mailQueueRes] = await Promise.all([
         adminApi.getStats(),
         adminApi.getUsers({ limit: 100 }),
         adminApi.getPoller(),
+        adminApi.getMailQueue(),
       ]);
 
       if (statsRes.data?.stats) setStats(statsRes.data.stats);
@@ -65,6 +75,17 @@ export default function Admin() {
           intervalMinutes: pollerRes.data.poller.intervalMinutes || 60,
         });
         setPollerRunning(pollerRes.data.poller.isRunning);
+      }
+      if (mailQueueRes.data) {
+        setMailQueueConfig({
+          enabled: mailQueueRes.data.worker?.hasActiveTimer ?? true,
+          intervalSeconds: mailQueueRes.data.worker?.intervalSeconds || 60,
+        });
+        setMailQueueStats({
+          pendingJobs: mailQueueRes.data.stats?.pendingJobs || 0,
+          usersWithPending: mailQueueRes.data.stats?.usersWithPending || 0,
+          lastRunAt: mailQueueRes.data.worker?.lastRunAt,
+        });
       }
     } catch (err) {
       showToast(err.response?.data?.error || 'Failed to load administrator data', 'error');
@@ -191,6 +212,52 @@ export default function Admin() {
       showToast(err.response?.data?.message || err.response?.data?.error || 'Failed to run poller', 'error');
     } finally {
       setTriggeringPoller(false);
+    }
+  };
+
+  // Save mail queue worker configuration
+  const handleSaveMailQueueConfig = async (e) => {
+    if (e) e.preventDefault();
+    setSavingMailQueue(true);
+    try {
+      const res = await adminApi.updateMailQueueConfig({
+        enabled: mailQueueConfig.enabled,
+        intervalSeconds: Number(mailQueueConfig.intervalSeconds),
+      });
+      showToast(res.data.message || 'Mail queue worker frequency updated!');
+      const qRes = await adminApi.getMailQueue();
+      if (qRes.data) {
+        setMailQueueStats({
+          pendingJobs: qRes.data.stats?.pendingJobs || 0,
+          usersWithPending: qRes.data.stats?.usersWithPending || 0,
+          lastRunAt: qRes.data.worker?.lastRunAt,
+        });
+      }
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to update mail queue config', 'error');
+    } finally {
+      setSavingMailQueue(false);
+    }
+  };
+
+  // Flush / manually sweep mail queue
+  const handleFlushMailQueue = async () => {
+    setFlushingMailQueue(true);
+    try {
+      const res = await adminApi.flushMailQueue();
+      showToast(res.data.message || 'Mail queue processed successfully!');
+      const qRes = await adminApi.getMailQueue();
+      if (qRes.data) {
+        setMailQueueStats({
+          pendingJobs: qRes.data.stats?.pendingJobs || 0,
+          usersWithPending: qRes.data.stats?.usersWithPending || 0,
+          lastRunAt: qRes.data.worker?.lastRunAt,
+        });
+      }
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to process mail queue', 'error');
+    } finally {
+      setFlushingMailQueue(false);
     }
   };
 
@@ -343,7 +410,7 @@ export default function Admin() {
             }`}
           >
             <Sliders className="w-4 h-4 mr-2" />
-            <span>Default Polling Configuration</span>
+            <span>Polling & Mail Queue Engines</span>
           </button>
 
           <button
@@ -725,6 +792,148 @@ export default function Admin() {
                   <span className="font-mono text-slate-700">Cron Scheduler</span>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Mailing Queue Worker Frequency & Controls */}
+          <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+              <div>
+                <div className="inline-flex items-center space-x-1.5 text-indigo-600 text-xs font-bold uppercase tracking-wider mb-1">
+                  <Mail className="w-3.5 h-3.5" />
+                  <span>Email Dispatcher Engine</span>
+                </div>
+                <h2 className="text-xl font-bold text-slate-900">Mailing Queue Worker & Checking Frequency</h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  Configure how frequently the background worker inspects user mail queues to deliver pending price drop notifications.
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleFlushMailQueue}
+                  disabled={flushingMailQueue}
+                  className="inline-flex items-center px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-xs transition disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 mr-2 ${flushingMailQueue ? 'animate-spin' : ''}`} />
+                  <span>Flush & Send Pending Now</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Queue Worker Master Toggle */}
+            <div className="flex items-center justify-between p-4 rounded-xl border bg-slate-50">
+              <div className="space-y-0.5">
+                <span className="text-sm font-bold text-slate-900 flex items-center space-x-2">
+                  <Power className={`w-4 h-4 ${mailQueueConfig.enabled ? 'text-emerald-600' : 'text-slate-400'}`} />
+                  <span>Mail Queue Background Dispatcher</span>
+                </span>
+                <p className="text-xs text-slate-500">
+                  When enabled, sweeps all user mailing queues automatically to send drop alert emails.
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={mailQueueConfig.enabled}
+                  onChange={(e) => setMailQueueConfig((prev) => ({ ...prev, enabled: e.target.checked }))}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+              </label>
+            </div>
+
+            {/* Checking Frequency Presets */}
+            <div className="space-y-3">
+              <label className="block text-sm font-bold text-slate-900">
+                Mailing Queue Check Frequency
+              </label>
+              <p className="text-xs text-slate-500">
+                Interval at which the background worker wakes up to check for queued emails.
+              </p>
+
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {[
+                  { seconds: 15, label: '15 sec', desc: 'Rapid' },
+                  { seconds: 30, label: '30 sec', desc: 'High frequency' },
+                  { seconds: 60, label: '60 sec (1m)', desc: 'Recommended' },
+                  { seconds: 120, label: '2 min', desc: 'Relaxed' },
+                  { seconds: 300, label: '5 min', desc: 'Batched' },
+                ].map((preset) => {
+                  const isSelected = Number(mailQueueConfig.intervalSeconds) === preset.seconds;
+                  return (
+                    <button
+                      key={preset.seconds}
+                      type="button"
+                      onClick={() => setMailQueueConfig((prev) => ({ ...prev, intervalSeconds: preset.seconds }))}
+                      className={`p-3 rounded-xl border text-left transition ${
+                        isSelected
+                          ? 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-500/20 shadow-xs'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
+                      }`}
+                    >
+                      <div className="font-bold text-sm text-slate-900">{preset.label}</div>
+                      <div className="text-[11px] text-slate-500">{preset.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Custom Interval Input */}
+            <div className="space-y-2">
+              <label className="block text-xs font-semibold text-slate-600">
+                Or enter custom frequency (in seconds):
+              </label>
+              <div className="flex items-center space-x-3 max-w-xs">
+                <input
+                  type="number"
+                  min="5"
+                  max="3600"
+                  value={mailQueueConfig.intervalSeconds}
+                  onChange={(e) =>
+                    setMailQueueConfig((prev) => ({ ...prev, intervalSeconds: Number(e.target.value) }))
+                  }
+                  className="w-32 px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <span className="text-xs text-slate-500 font-medium">seconds</span>
+              </div>
+            </div>
+
+            {/* Save Button & Status Pill */}
+            <div className="pt-4 border-t flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center space-x-4 text-xs text-slate-500">
+                <span>
+                  Pending Emails in System:{' '}
+                  <strong className="text-slate-900 font-mono">
+                    {mailQueueStats?.pendingJobs ?? 0}
+                  </strong>
+                </span>
+                <span>•</span>
+                <span>
+                  Users with Pending:{' '}
+                  <strong className="text-slate-900 font-mono">
+                    {mailQueueStats?.usersWithPending ?? 0}
+                  </strong>
+                </span>
+                {mailQueueStats?.lastRunAt && (
+                  <>
+                    <span>•</span>
+                    <span>Last Sweep: {new Date(mailQueueStats.lastRunAt).toLocaleTimeString()}</span>
+                  </>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveMailQueueConfig}
+                disabled={savingMailQueue}
+                className="inline-flex items-center px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold shadow-md transition disabled:opacity-50"
+              >
+                {savingMailQueue && <RefreshCw className="w-4 h-4 mr-2 animate-spin" />}
+                <span>Save Mail Queue Frequency</span>
+              </button>
             </div>
           </div>
         </div>

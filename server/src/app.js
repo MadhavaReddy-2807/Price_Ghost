@@ -3,7 +3,6 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import { ENV } from './config/env.js';
 import { connectDB, getSanitizedUri } from './config/db.js';
-import { startPollerScheduler } from './services/poller.js';
 import { createRateLimiter } from './middleware/rateLimiter.js';
 
 import authRoutes from './routes/auth.js';
@@ -16,6 +15,7 @@ import healthRoutes from './routes/health.js';
 import { UserModel } from './models/User.js';
 import { SystemSettingModel } from './models/SystemSetting.js';
 import { startPollerScheduler, updatePollerConfig } from './services/poller.js';
+import { startMailQueueWorker, updateMailQueueWorkerConfig } from './services/mailQueueService.js';
 
 const app = express();
 
@@ -181,10 +181,27 @@ async function bootstrap() {
       } catch (err) {
         console.warn('[Poller Config Restore Notice]', err.message);
       }
+
+      // Restore persisted mail queue worker settings if configured by admin
+      try {
+        const queueSetting = await SystemSettingModel.findOne({ key: 'mailQueueConfig' });
+        if (queueSetting && queueSetting.value) {
+          updateMailQueueWorkerConfig({
+            enabled: queueSetting.value.enabled,
+            intervalMs: queueSetting.value.intervalMs,
+          });
+          console.log(
+            `[Mail Queue Worker] Restored admin config: every ${queueSetting.value.intervalMs / 1000}s, enabled=${queueSetting.value.enabled}`
+          );
+        }
+      } catch (err) {
+        console.warn('[Mail Queue Config Restore Notice]', err.message);
+      }
     })
     .catch((err) => console.error('[Database Startup Notice]', err.message));
 
   startPollerScheduler();
+  startMailQueueWorker(60000);
 
   app.listen(ENV.PORT, () => {
     console.log(`\n======================================================`);

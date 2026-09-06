@@ -82,6 +82,9 @@ export const adminApi = {
   getPoller: () => api.get('/admin/poller'),
   updatePollerConfig: (config) => api.post('/admin/poller/config', config),
   triggerPoller: (mode = 'all') => api.post('/admin/poller/trigger', { mode }),
+  getMailQueue: () => api.get('/admin/mail-queue'),
+  updateMailQueueConfig: (config) => api.post('/admin/mail-queue/config', config),
+  flushMailQueue: () => api.post('/admin/mail-queue/flush'),
 };
 
 export default api;

@@ -14,10 +14,18 @@ async function runMailQueueTests() {
   console.log('🧪 Starting User Mailing Queue Verification Tests...\n');
   await connectDB();
 
-  let testUser = await UserModel.findOne({ email: 'madhava2807@gmail.com' });
+  let testUser = await UserModel.findOne({ email: 'queue-test@priceghost.test' });
   if (!testUser) {
-    console.error('Test user madhava2807@gmail.com not found');
-    process.exit(1);
+    testUser = await UserModel.create({
+      googleId: 'test_google_id_queue_123',
+      name: 'Queue Test User',
+      email: 'queue-test@priceghost.test',
+      role: 'user',
+      hasAccess: true,
+      notifications: { email: true },
+      trackedItems: [],
+      mailQueue: [],
+    });
   }
 
   let sampleItem = await ItemModel.findOne({ externalId: 'B0H6S7QJ2Y' }) || await ItemModel.findOne({});
@@ -26,13 +34,24 @@ async function runMailQueueTests() {
     process.exit(1);
   }
 
-  // Reset tracking state for clean test run
-  const sampleTracking = testUser.trackedItems.find((t) => t.itemId?.toString() === sampleItem._id.toString());
-  if (sampleTracking) {
+  // Set up clean tracking subdocument on the isolated test user
+  let sampleTracking = testUser.trackedItems.find((t) => t.itemId?.toString() === sampleItem._id.toString());
+  if (!sampleTracking) {
+    testUser.trackedItems.push({
+      itemId: sampleItem._id,
+      targetPercentageDrop: 10,
+      baselinePrice: 2499,
+      targetPrice: 2249,
+      baseline: 'initial',
+      lastNotifiedPrice: null,
+      lastNotifiedAt: null,
+    });
+  } else {
     sampleTracking.lastNotifiedPrice = null;
     sampleTracking.lastNotifiedAt = null;
-    await testUser.save();
   }
+  testUser.mailQueue = [];
+  await testUser.save();
 
   let allPassed = true;
 
@@ -156,6 +175,9 @@ async function runMailQueueTests() {
     console.error('❌ Test 5 ERROR:', err.message);
     allPassed = false;
   }
+
+  // Clean up temporary test user
+  await UserModel.deleteOne({ email: 'queue-test@priceghost.test' });
 
   await mongoose.disconnect();
 
