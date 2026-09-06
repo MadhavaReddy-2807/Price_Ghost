@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { ItemModel } from '../models/Item.js';
 import { UserModel } from '../models/User.js';
-import { authMiddleware, requireAccessMiddleware } from '../middleware/auth.js';
+import { authMiddleware, requireExtensionAccessMiddleware } from '../middleware/auth.js';
 import { calculateTargetPrice, sanitizePriceString } from '../services/priceEngine.js';
 import { scrapeProduct, detectPlatform } from '../services/scraper/index.js';
+import { ENV } from '../config/env.js';
 
 const router = Router();
 router.use(authMiddleware);
-router.use(requireAccessMiddleware);
 
 /**
  * Common helper to upsert canonical item and link it to the user's tracking list.
@@ -130,6 +130,24 @@ async function trackProductForUser(userId, productData) {
 // POST /api/items/track — Upsert canonical item and link to user tracking list
 router.post('/track', async (req, res) => {
   try {
+    const isExtensionRequest =
+      req.headers['x-client-type'] === 'extension' ||
+      req.body?.source === 'extension' ||
+      req.query?.client === 'extension';
+
+    if (isExtensionRequest) {
+      const user = await UserModel.findById(req.user.userId).select('hasAccess role email');
+      const isAdmin = user?.role === 'admin' || (user?.email && ENV.ADMIN_EMAILS.includes(user.email.toLowerCase()));
+      if (!isAdmin && user?.hasAccess !== true) {
+        return res.status(403).json({
+          error: 'Extension Access Restricted: Your account has not been approved for Chrome Extension access by an administrator.',
+          accessRestricted: true,
+          extensionAccessRequired: true,
+          message: 'An administrator must approve your account before you can track items via the Chrome Extension.',
+        });
+      }
+    }
+
     const { platform, externalId, title, url } = req.body;
 
     if (!platform || !externalId || !title || !url) {

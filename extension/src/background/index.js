@@ -26,6 +26,7 @@ async function serviceWorkerFetch(endpoint, options = {}, tokenOverride = null) 
 
   const headers = {
     'Content-Type': 'application/json',
+    'X-Client-Type': 'extension',
     ...(options.headers || {}),
   };
   if (token) {

@@ -77,6 +77,7 @@ async function trackProductWithBackend(product, token, defaultThreshold) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'X-Client-Type': 'extension',
             'Authorization': `Bearer ${token}`,
           },
           body: JSON.stringify(payload),

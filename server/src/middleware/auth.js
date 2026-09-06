@@ -58,9 +58,10 @@ export async function requireAccessMiddleware(req, res, next) {
 
     if (user.hasAccess !== true) {
       return res.status(403).json({
-        error: 'Access Restricted: Your account has not been approved by an administrator yet.',
+        error: 'Extension Access Restricted: Your account has not been approved for Chrome Extension access by an administrator.',
         accessRestricted: true,
-        message: 'An administrator must approve your account before you can track items or use Price Ghost.',
+        extensionAccessRequired: true,
+        message: 'An administrator must approve your account before you can use the Price Ghost Chrome Extension.',
       });
     }
 
@@ -70,6 +71,11 @@ export async function requireAccessMiddleware(req, res, next) {
     return res.status(500).json({ error: 'Failed to verify account access status', details: err.message });
   }
 }
+
+/**
+ * Explicit alias for Extension Access enforcement.
+ */
+export const requireExtensionAccessMiddleware = requireAccessMiddleware;
 
 /**
  * Middleware that restricts route to administrators only.

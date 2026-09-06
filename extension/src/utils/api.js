@@ -61,6 +61,7 @@ export async function apiRequest(endpoint, options = {}) {
 
   const headers = {
     'Content-Type': 'application/json',
+    'X-Client-Type': 'extension',
     ...(options.headers || {}),
   };
 

@@ -541,6 +541,27 @@ export default function Popup() {
             <span className="text-[11px] text-gray-400 truncate max-w-[120px]">{user?.email}</span>
           </div>
 
+          {/* Extension Access Pending Notice */}
+          {user && user.hasAccess !== true && user.role !== 'admin' && (
+            <div className="bg-amber-50 border-b border-amber-200 px-3 py-2 text-xs text-amber-900 flex items-start space-x-2">
+              <span className="text-sm">🔒</span>
+              <div className="flex-1">
+                <p className="font-bold text-[11px] text-amber-900">Extension Access Pending</p>
+                <p className="text-[10px] text-amber-700 leading-tight mt-0.5">
+                  Your account has not been approved for extension tracking yet. You can still use your{' '}
+                  <a
+                    href="https://price-ghost.netlify.app/dashboard"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-bold underline hover:text-amber-950"
+                  >
+                    Web Dashboard
+                  </a>.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Active Tab Product Banner (Authenticated) */}
           {currentPageProduct && currentPageProduct.currentPrice > 0 && (
             <div className="bg-gradient-to-r from-indigo-50/90 to-violet-50/90 border-b border-indigo-100 px-3 py-2 flex items-center justify-between text-xs shadow-xs">
@@ -585,11 +606,18 @@ export default function Popup() {
                   </div>
                   <button
                     onClick={handleTrackCurrentPage}
-                    disabled={trackingCurrent}
+                    disabled={trackingCurrent || (user && user.hasAccess !== true && user.role !== 'admin')}
                     className="flex-shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-semibold px-2.5 py-1 rounded-md shadow-xs transition flex items-center space-x-1 disabled:opacity-50"
+                    title={user && user.hasAccess !== true && user.role !== 'admin' ? 'Extension access requires administrator approval' : ''}
                   >
                     <Sparkles className="w-3 h-3" />
-                    <span>{trackingCurrent ? 'Tracking...' : `Track (-${currentTabThreshold}%)`}</span>
+                    <span>
+                      {user && user.hasAccess !== true && user.role !== 'admin'
+                        ? 'Access Pending'
+                        : trackingCurrent
+                        ? 'Tracking...'
+                        : `Track (-${currentTabThreshold}%)`}
+                    </span>
                   </button>
                 </div>
               )}
