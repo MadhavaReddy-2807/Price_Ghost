@@ -26,6 +26,14 @@ async function runMailQueueTests() {
     process.exit(1);
   }
 
+  // Reset tracking state for clean test run
+  const sampleTracking = testUser.trackedItems.find((t) => t.itemId?.toString() === sampleItem._id.toString());
+  if (sampleTracking) {
+    sampleTracking.lastNotifiedPrice = null;
+    sampleTracking.lastNotifiedAt = null;
+    await testUser.save();
+  }
+
   let allPassed = true;
 
   // Test 1: Enqueue an email into user mail queue
@@ -45,6 +53,7 @@ async function runMailQueueTests() {
         dropPercentage: 12,
         savings: 300,
       },
+      force: true,
     });
 
     console.log('Enqueued Job ID:', queueJob._id);
@@ -119,6 +128,32 @@ async function runMailQueueTests() {
     console.log('✅ Test 4 PASSED: Global queue sweep runs cleanly.');
   } catch (err) {
     console.error('❌ Test 4 ERROR:', err.message);
+    allPassed = false;
+  }
+
+  // Test 5: Verify Duplicate Prevention (Reject identical alert)
+  console.log('\n--- Test 5: Duplicate Prevention Verification ---');
+  try {
+    const duplicateJob = await enqueueUserEmail(testUser._id, {
+      type: 'price_drop_alert',
+      subject: `Duplicate Alert: ${sampleItem.title.slice(0, 30)}...`,
+      payload: {
+        itemId: sampleItem._id,
+        currentPrice: 2199, // Same price as lastNotifiedPrice
+        baselinePrice: 2499,
+        dropPercentage: 12,
+      },
+      force: false,
+    });
+
+    if (duplicateJob === null) {
+      console.log('✅ Test 5 PASSED: Duplicate email successfully suppressed and prevented.');
+    } else {
+      console.error('❌ Test 5 FAILED: Duplicate email was not suppressed!');
+      allPassed = false;
+    }
+  } catch (err) {
+    console.error('❌ Test 5 ERROR:', err.message);
     allPassed = false;
   }
 

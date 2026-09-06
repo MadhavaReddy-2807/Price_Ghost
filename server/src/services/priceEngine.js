@@ -74,6 +74,8 @@ export function isInQuietHours(start, end, date = new Date()) {
  * @param {number|null} [params.lastNotifiedPrice]
  * @param {string} [params.quietHoursStart]
  * @param {string} [params.quietHoursEnd]
+ * @param {Date|string} [params.lastNotifiedAt]
+ * @param {number} [params.minIntervalMinutes=60]
  * @param {Date} [params.date]
  * @returns {boolean}
  */
@@ -82,6 +84,8 @@ export function shouldNotifyUser({
   baselinePrice,
   targetPercentageDrop,
   lastNotifiedPrice,
+  lastNotifiedAt,
+  minIntervalMinutes = 60,
   quietHoursStart,
   quietHoursEnd,
   date = new Date(),
@@ -91,9 +95,17 @@ export function shouldNotifyUser({
   const dropPercent = calculateDropPercentage(baselinePrice, currentPrice);
   if (dropPercent < (targetPercentageDrop || 10)) return false;
 
-  // Spam prevention: Do not re-notify if price has not dropped below previous notification
+  // Spam prevention 1: Do not re-notify if price has not dropped below previous notification
   if (lastNotifiedPrice !== undefined && lastNotifiedPrice !== null) {
     if (currentPrice >= lastNotifiedPrice) return false;
+  }
+
+  // Spam prevention 2: Minimum cooldown interval between successive alerts for the same item
+  if (lastNotifiedAt && minIntervalMinutes > 0) {
+    const elapsedMinutes = (date.getTime() - new Date(lastNotifiedAt).getTime()) / (1000 * 60);
+    if (elapsedMinutes < minIntervalMinutes) {
+      return false;
+    }
   }
 
   // Quiet hours suppression

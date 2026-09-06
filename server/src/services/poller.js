@@ -214,12 +214,13 @@ export async function runPollerCycle(options = {}) {
               baselinePrice,
               targetPercentageDrop: tracking.targetPercentageDrop,
               lastNotifiedPrice: tracking.lastNotifiedPrice,
+              lastNotifiedAt: tracking.lastNotifiedAt,
               quietHoursStart: user.notifications?.quietHoursStart,
               quietHoursEnd: user.notifications?.quietHoursEnd,
             });
 
             debugLog(
-              `Subscriber eval (${user.email}) -> baseline=₹${baselinePrice}, targetDrop=${tracking.targetPercentageDrop}%, lastNotifiedPrice=${tracking.lastNotifiedPrice || 'none'}, shouldNotify=${shouldNotify}`
+              `Subscriber eval (${user.email}) -> baseline=₹${baselinePrice}, targetDrop=${tracking.targetPercentageDrop}%, lastNotifiedPrice=${tracking.lastNotifiedPrice || 'none'}, lastNotifiedAt=${tracking.lastNotifiedAt ? tracking.lastNotifiedAt.toISOString() : 'none'}, shouldNotify=${shouldNotify}`
             );
 
             if (shouldNotify) {

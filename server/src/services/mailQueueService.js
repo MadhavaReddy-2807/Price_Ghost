@@ -10,7 +10,7 @@ import { sendPriceDropEmail } from './emailService.js';
  * @param {Object} options.payload
  * @returns {Promise<Object>} Created or updated mail queue item
  */
-export async function enqueueUserEmail(userId, { type = 'price_drop_alert', subject, payload = {} }) {
+export async function enqueueUserEmail(userId, { type = 'price_drop_alert', subject, payload = {}, force = false }) {
   const user = await UserModel.findById(userId);
   if (!user) {
     throw new Error(`Cannot enqueue email: User ${userId} not found.`);
@@ -21,7 +21,7 @@ export async function enqueueUserEmail(userId, { type = 'price_drop_alert', subj
     return null;
   }
 
-  // Deduplicate: If an alert for the same product is already pending, update its payload
+  // Deduplicate 1: If an alert for the same product is already pending, update its payload
   const existingPending = user.mailQueue.find(
     (job) =>
       job.status === 'pending' &&
@@ -36,6 +36,36 @@ export async function enqueueUserEmail(userId, { type = 'price_drop_alert', subj
     await user.save();
     console.log(`[Mail Queue] 🔄 Updated existing pending queue item for ${user.email}: "${subject}"`);
     return existingPending;
+  }
+
+  // Deduplicate 2: Check tracking record's lastNotifiedPrice - avoid duplicate if currentPrice >= lastNotifiedPrice
+  const tracking = user.trackedItems.find(
+    (t) => t.itemId?.toString() === payload.itemId?.toString()
+  );
+  if (!force && tracking && tracking.lastNotifiedPrice !== undefined && tracking.lastNotifiedPrice !== null) {
+    if (payload.currentPrice >= tracking.lastNotifiedPrice) {
+      console.log(
+        `[Mail Queue] 🛑 Duplicate prevented: currentPrice ₹${payload.currentPrice} >= lastNotifiedPrice ₹${tracking.lastNotifiedPrice} for ${user.email}`
+      );
+      return null;
+    }
+  }
+
+  // Deduplicate 3: Check if identical alert was already sent within the last 24 hours
+  const recentSent = user.mailQueue.find(
+    (job) =>
+      job.status === 'sent' &&
+      job.payload?.itemId &&
+      job.payload.itemId.toString() === payload.itemId?.toString() &&
+      job.payload.currentPrice === payload.currentPrice &&
+      job.sentAt &&
+      (Date.now() - new Date(job.sentAt).getTime()) < 24 * 60 * 60 * 1000
+  );
+  if (!force && recentSent) {
+    console.log(
+      `[Mail Queue] 🛑 Duplicate prevented: identical alert already sent to ${user.email} within 24h at ₹${payload.currentPrice}`
+    );
+    return null;
   }
 
   const queueItem = {
@@ -107,6 +137,28 @@ export async function processUserMailQueue(userId) {
 
     try {
       if (job.type === 'price_drop_alert') {
+        // In-flight deduplication: verify that an alert hasn't already been sent at this price or lower within 1h
+        const trackingCheck = user.trackedItems.find(
+          (t) => t.itemId?.toString() === job.payload?.itemId?.toString()
+        );
+        if (
+          trackingCheck &&
+          trackingCheck.lastNotifiedPrice !== undefined &&
+          trackingCheck.lastNotifiedPrice !== null &&
+          job.payload?.currentPrice >= trackingCheck.lastNotifiedPrice &&
+          trackingCheck.lastNotifiedAt &&
+          (Date.now() - new Date(trackingCheck.lastNotifiedAt).getTime()) < 60 * 60 * 1000
+        ) {
+          console.log(
+            `[Mail Queue] 🛑 Duplicate suppressed for ${user.email}: price ₹${job.payload?.currentPrice} >= lastNotifiedPrice ₹${trackingCheck.lastNotifiedPrice}`
+          );
+          job.status = 'sent';
+          job.sentAt = new Date();
+          job.messageId = 'SUPPRESSED_DUPLICATE';
+          job.lastError = 'Duplicate email suppressed: price not lower than last notified';
+          continue;
+        }
+
         const emailResult = await sendPriceDropEmail({
           user: { name: user.name, email: user.email },
           item: {
