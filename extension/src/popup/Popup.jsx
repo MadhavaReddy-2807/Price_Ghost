@@ -106,6 +106,9 @@ export default function Popup() {
         ));
 
         if (dashboardTab) {
+          const isLocal = dashboardTab.url.includes('localhost') || dashboardTab.url.includes('127.0.0.1');
+          const apiBaseUrl = isLocal ? 'http://localhost:5000/api' : 'https://price-ghost.onrender.com/api';
+
           const results = await chrome.scripting.executeScript({
             target: { tabId: dashboardTab.id },
             func: () => ({
@@ -119,7 +122,7 @@ export default function Popup() {
             let userObj = null;
             try { userObj = JSON.parse(data.user); } catch {}
             await setAuthToken(data.token);
-            if (userObj) await setStorage({ user: userObj });
+            await setStorage({ user: userObj, apiBaseUrl });
             setToken(data.token);
             setUser(userObj);
             setSyncMessage('✅ Successfully connected to ' + (userObj?.email || 'account') + '!');
@@ -142,7 +145,7 @@ export default function Popup() {
 
       setSyncMessage('No active Price Ghost Web tab found. Click "1. Sign In on Web Dashboard" first.');
     } catch (err) {
-      setSyncMessage('Sync note: ' + err.message);
+      setSyncMessage('Sync note: ' + (err.message || 'Could not access web tab.'));
     } finally {
       setSyncingTab(false);
     }
@@ -152,12 +155,20 @@ export default function Popup() {
     e.preventDefault();
     if (!manualToken.trim()) return;
     setLoading(true);
+    setSyncMessage('');
     try {
-      await setAuthToken(manualToken.trim());
-      setToken(manualToken.trim());
-      await loadUserData(manualToken.trim());
+      const cleanToken = manualToken.trim();
+      await setAuthToken(cleanToken);
+      setToken(cleanToken);
+      const profile = await fetchCurrentUser().catch(() => null);
+      if (profile?.user) {
+        setUser(profile.user);
+        await setStorage({ user: profile.user });
+        setSyncMessage('✅ Connected successfully to ' + (profile.user.email || 'account') + '!');
+      }
+      await loadUserData(cleanToken);
     } catch (err) {
-      setSyncMessage('Token invalid: ' + err.message);
+      setSyncMessage('Token rejected: ' + (err.message || 'Invalid or expired token'));
     } finally {
       setLoading(false);
     }
@@ -181,7 +192,13 @@ export default function Popup() {
   async function loadUserData(authToken) {
     try {
       const [profileRes, itemsRes, summaryRes] = await Promise.all([
-        fetchCurrentUser().catch(() => null),
+        fetchCurrentUser().catch((e) => {
+          if (e.status === 401) {
+            handleLogout();
+            setSyncMessage('⚠️ Session expired. Please sign in again.');
+          }
+          return null;
+        }),
         fetchTrackedItems().catch(() => []),
         fetchDashboardSummary().catch(() => null),
       ]);
@@ -234,7 +251,10 @@ export default function Popup() {
       await untrackItem(itemId);
       setItems((prev) => prev.filter((entry) => entry.item?._id !== itemId));
     } catch (err) {
-      alert('Failed to remove item: ' + err.message);
+      const msg = err.message?.includes('Failed to fetch')
+        ? 'Network error. Please verify backend connection.'
+        : err.message;
+      alert('Failed to remove item: ' + msg);
     }
   }
 
@@ -259,7 +279,10 @@ export default function Popup() {
         });
       }
     } catch (err) {
-      alert('Track failed: ' + err.message);
+      const msg = err.message?.includes('Failed to fetch')
+        ? 'Could not connect to Price Ghost tracker service. Please check connection.'
+        : err.message;
+      alert('Track failed: ' + msg);
     } finally {
       setTrackingCurrent(false);
     }
@@ -291,7 +314,10 @@ export default function Popup() {
       );
       setEditingItem(null);
     } catch (err) {
-      alert('Failed to update threshold: ' + err.message);
+      const msg = err.message?.includes('Failed to fetch')
+        ? 'Network error updating threshold. Please check connection.'
+        : err.message;
+      alert('Failed to update threshold: ' + msg);
     } finally {
       setSavingThreshold(false);
     }

@@ -1,5 +1,8 @@
 import { UserModel } from '../models/User.js';
 import { sendPriceDropEmail } from './emailService.js';
+import { isUserEligibleForScheduledDelivery, getLastSentEmailTimestamp } from './priceEngine.js';
+
+export { isUserEligibleForScheduledDelivery, getLastSentEmailTimestamp };
 
 const activeUserLocks = new Set();
 let activeQueueWorkerInterval = null;
@@ -113,10 +116,15 @@ export async function enqueueUserEmail(userId, { type = 'price_drop_alert', subj
 
 /**
  * Processes all pending emails in a user's mail queue and updates tracking state accordingly.
+ * Checks quiet hours and user-configured frequency schedule unless force=true.
+ *
  * @param {string|import('mongoose').Types.ObjectId} userId
- * @returns {Promise<{ processed: number, sent: number, failed: number }>}
+ * @param {Object} [options={}]
+ * @param {boolean} [options.force=false]
+ * @returns {Promise<{ processed: number, sent: number, failed: number, deferred?: boolean, reason?: string }>}
  */
-export async function processUserMailQueue(userId) {
+export async function processUserMailQueue(userId, options = {}) {
+  const { force = false } = options;
   const lockKey = userId.toString();
   if (activeUserLocks.has(lockKey)) {
     console.log(`[Mail Queue] ⏳ Queue already being processed for user ${lockKey}, skipping concurrent run.`);
@@ -135,9 +143,25 @@ export async function processUserMailQueue(userId) {
       return { processed: 0, sent: 0, failed: 0 };
     }
 
-    const pendingJobs = user.mailQueue.filter((job) => job.status === 'pending');
+    const pendingJobs = (user.mailQueue || []).filter((job) => job.status === 'pending');
     if (pendingJobs.length === 0) {
       return { processed: 0, sent: 0, failed: 0 };
+    }
+
+    // Evaluate mailing schedule and quiet hours (unless forced by manual trigger)
+    if (!force) {
+      const eligibility = isUserEligibleForScheduledDelivery(user);
+      if (!eligibility.eligible) {
+        console.log(`[Mail Queue] ⏳ Delivery deferred for ${user.email}: ${eligibility.reason}`);
+        return {
+          processed: 0,
+          sent: 0,
+          failed: 0,
+          deferred: true,
+          reason: eligibility.reason,
+          pendingCount: pendingJobs.length,
+        };
+      }
     }
 
     console.log(`[Mail Queue] 🚀 Processing ${pendingJobs.length} pending email(s) for ${user.email}...`);
@@ -260,16 +284,20 @@ export async function processUserMailQueue(userId) {
 
 /**
  * Scans and processes pending mail queues for all users.
- * Useful for scheduled queue workers and end-of-poller-cycle sweeps.
+ * Respects each user's mailing schedule and quiet hours unless force=true.
+ *
+ * @param {Object} [options={}]
+ * @param {boolean} [options.force=false]
  */
-export async function processAllPendingMailQueues() {
+export async function processAllPendingMailQueues(options = {}) {
+  const { force = false } = options;
   const usersWithPending = await UserModel.find({
     'mailQueue.status': 'pending',
     'notifications.email': true,
   });
 
   if (usersWithPending.length === 0) {
-    return { totalUsers: 0, totalProcessed: 0, totalSent: 0, totalFailed: 0 };
+    return { totalUsers: 0, totalProcessed: 0, totalSent: 0, totalFailed: 0, totalDeferred: 0 };
   }
 
   console.log(`[Mail Queue Worker] Found ${usersWithPending.length} user(s) with pending emails.`);
@@ -277,12 +305,14 @@ export async function processAllPendingMailQueues() {
   let totalProcessed = 0;
   let totalSent = 0;
   let totalFailed = 0;
+  let totalDeferred = 0;
 
   for (const user of usersWithPending) {
-    const res = await processUserMailQueue(user._id);
-    totalProcessed += res.processed;
-    totalSent += res.sent;
-    totalFailed += res.failed;
+    const res = await processUserMailQueue(user._id, { force });
+    totalProcessed += res.processed || 0;
+    totalSent += res.sent || 0;
+    totalFailed += res.failed || 0;
+    if (res.deferred) totalDeferred++;
   }
 
   return {
@@ -290,6 +320,7 @@ export async function processAllPendingMailQueues() {
     totalProcessed,
     totalSent,
     totalFailed,
+    totalDeferred,
   };
 }
 
@@ -344,7 +375,7 @@ export async function retryFailedUserQueue(userId, queueItemId = null) {
   if (resetCount > 0) {
     await user.save();
     console.log(`[Mail Queue] Reset ${resetCount} failed email(s) to pending for ${user.email}. Processing now...`);
-    const processResult = await processUserMailQueue(user._id);
+    const processResult = await processUserMailQueue(user._id, { force: true });
     return { resetCount, ...processResult };
   }
 

@@ -11,6 +11,7 @@
     "test": "node src/test_verify.js",
     "test:health": "node src/test_health_monitor.js",
     "test:queue": "node src/test_mail_queue.js",
+    "test:schedule": "node src/scripts/test_mailing_schedules.js",
     "test:admin": "node src/test_admin.js"
   },
   "dependencies": {

@@ -438,7 +438,7 @@ router.post('/mail-queue/config', async (req, res) => {
 router.post('/mail-queue/flush', async (req, res) => {
   try {
     console.log(`[Admin] Mail queue sweep manually triggered by admin ${req.user.email}`);
-    const result = await processAllPendingMailQueues();
+    const result = await processAllPendingMailQueues({ force: true });
 
     return res.json({
       success: true,

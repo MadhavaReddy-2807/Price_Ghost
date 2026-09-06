@@ -341,7 +341,7 @@ export default function Dashboard() {
           {/* Instant Trigger Poller Button */}
           <button
             onClick={() => handleTriggerPoller('user')}
-            disabled={isTriggeringPoll || pollerStatus?.isRunning}
+            disabled={isTriggeringPoll || pollerStatus?.userChecking}
             title="Poll current prices immediately from live stores for your tracked products"
             className="inline-flex items-center px-3.5 py-2 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs transition disabled:opacity-50"
           >
@@ -915,78 +915,93 @@ export default function Dashboard() {
               </button>
             </div>
 
-            {/* Section 1: Auto-Polling Engine Master Switch */}
-            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between">
-              <div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-xs font-bold text-slate-900">Automatic Background Poller</span>
-                  <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      pollerStatus?.autoPollEnabled
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-slate-200 text-slate-600'
+            {/* Section 1 & 2: Background Poller Engine (Admin controls or User Info) */}
+            {user?.role === 'admin' ? (
+              <>
+                <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-bold text-slate-900">Automatic Background Poller</span>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          pollerStatus?.autoPollEnabled
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-slate-200 text-slate-600'
+                        }`}
+                      >
+                        {pollerStatus?.autoPollEnabled ? 'ACTIVE' : 'PAUSED'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1 max-w-xs">
+                      Master background scheduler for continuous price scraping across all catalog products.
+                    </p>
+                  </div>
+
+                  <button
+                    disabled={savingPollerConfig}
+                    onClick={() =>
+                      handleUpdatePollerConfig({
+                        enabled: !pollerStatus?.autoPollEnabled,
+                      })
+                    }
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                      pollerStatus?.autoPollEnabled ? 'bg-indigo-600' : 'bg-slate-300'
                     }`}
                   >
-                    {pollerStatus?.autoPollEnabled ? 'ACTIVE' : 'PAUSED'}
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        pollerStatus?.autoPollEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Polling Frequency Interval (Admin)
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { label: '15m (Testing)', val: 15 },
+                      { label: '30 Minutes', val: 30 },
+                      { label: '1 Hour', val: 60 },
+                      { label: '3 Hours (Rec.)', val: 180 },
+                      { label: '6 Hours', val: 360 },
+                      { label: '12 Hours', val: 720 },
+                    ].map((item) => (
+                      <button
+                        key={item.val}
+                        type="button"
+                        disabled={savingPollerConfig || !pollerStatus?.autoPollEnabled}
+                        onClick={() => handleUpdatePollerConfig({ intervalMinutes: item.val })}
+                        className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition text-center ${
+                          pollerStatus?.intervalMinutes === item.val
+                            ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-xs'
+                            : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                        } ${!pollerStatus?.autoPollEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Current schedule: {pollerStatus?.cronExpression || '0 * * * *'}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <div className="p-4 bg-emerald-50/70 border border-emerald-100 rounded-2xl">
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-bold text-emerald-900">Background Auto-Monitoring</span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                    ACTIVE
                   </span>
                 </div>
-                <p className="text-xs text-slate-500 mt-1 max-w-xs">
-                  Automatically triggers background price checks and dispatches price drop alert emails.
+                <p className="text-xs text-emerald-700 mt-1">
+                  Price Ghost automatically tracks and checks your products in the background every hour and dispatches instant drop notifications to your email.
                 </p>
               </div>
-
-              <button
-                disabled={savingPollerConfig}
-                onClick={() =>
-                  handleUpdatePollerConfig({
-                    enabled: !pollerStatus?.autoPollEnabled,
-                  })
-                }
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-                  pollerStatus?.autoPollEnabled ? 'bg-indigo-600' : 'bg-slate-300'
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    pollerStatus?.autoPollEnabled ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-            </div>
-
-            {/* Section 2: Frequency Selector */}
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold text-slate-700">
-                Polling Frequency Interval
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { label: '15m (Testing)', val: 15 },
-                  { label: '30 Minutes', val: 30 },
-                  { label: '1 Hour', val: 60 },
-                  { label: '3 Hours (Rec.)', val: 180 },
-                  { label: '6 Hours', val: 360 },
-                  { label: '12 Hours', val: 720 },
-                ].map((item) => (
-                  <button
-                    key={item.val}
-                    type="button"
-                    disabled={savingPollerConfig || !pollerStatus?.autoPollEnabled}
-                    onClick={() => handleUpdatePollerConfig({ intervalMinutes: item.val })}
-                    className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition text-center ${
-                      pollerStatus?.intervalMinutes === item.val
-                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-xs'
-                        : 'border-slate-200 text-slate-700 hover:bg-slate-50'
-                    } ${!pollerStatus?.autoPollEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Current schedule: {pollerStatus?.cronExpression || '*/180 * * * *'}
-              </p>
-            </div>
+            )}
 
             {/* Section 3: Live Dashboard Auto-Sync while Open */}
             <div className="p-3.5 bg-indigo-50/50 border border-indigo-100 rounded-xl flex items-center justify-between">
@@ -1012,10 +1027,10 @@ export default function Dashboard() {
               <label className="block text-xs font-semibold text-slate-700">
                 Manual Polling Triggers
               </label>
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className={`grid ${user?.role === 'admin' ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5`}>
                 <button
                   type="button"
-                  disabled={isTriggeringPoll || pollerStatus?.isRunning}
+                  disabled={isTriggeringPoll || pollerStatus?.userChecking}
                   onClick={() => {
                     handleTriggerPoller('user');
                     setShowPollerModal(false);
@@ -1026,18 +1041,20 @@ export default function Dashboard() {
                   <span>Check My Items</span>
                 </button>
 
-                <button
-                  type="button"
-                  disabled={isTriggeringPoll || pollerStatus?.isRunning}
-                  onClick={() => {
-                    handleTriggerPoller('all');
-                    setShowPollerModal(false);
-                  }}
-                  className="py-2.5 px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center justify-center space-x-1.5 disabled:opacity-50"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Poll Full Queue</span>
-                </button>
+                {user?.role === 'admin' && (
+                  <button
+                    type="button"
+                    disabled={isTriggeringPoll || pollerStatus?.isRunning}
+                    onClick={() => {
+                      handleTriggerPoller('all');
+                      setShowPollerModal(false);
+                    }}
+                    className="py-2.5 px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center justify-center space-x-1.5 disabled:opacity-50"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Poll Full Queue</span>
+                  </button>
+                )}
               </div>
             </div>
 

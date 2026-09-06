@@ -194,7 +194,7 @@ router.get('/tracked', async (req, res) => {
     }
 
     // Filter out any orphaned item references
-    const populatedTracked = user.trackedItems
+    const populatedTracked = (user.trackedItems || [])
       .filter((t) => t.itemId != null)
       .map((t) => ({
         tracking: {

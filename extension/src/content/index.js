@@ -35,44 +35,84 @@ async function trackProductWithBackend(product, token, defaultThreshold) {
 
     console.log(`[Price Ghost] 🚀 Sending manual track request for "${product.title}"...`);
 
-    const response = await fetch(`${API_BASE_URL}/items/track`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      console.log('[Price Ghost] 👻 Tracked product successfully:', data.item?.title || product.title);
-
-      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-        chrome.storage.local.get(['trackedKeys'], (res) => {
-          const trackedKeys = res.trackedKeys || {};
-          const key = `${product.platform}:${product.externalId}`;
-          trackedKeys[key] = {
-            itemId: data.item?._id,
-            targetPercentageDrop: defaultThreshold || 10,
-            trackedAt: Date.now(),
-          };
-          chrome.storage.local.set({ trackedKeys });
+    // 1. First choice: delegate to Extension Service Worker
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      try {
+        const swResponse = await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage(
+            {
+              type: 'TRACK_ITEM',
+              payload,
+              token,
+            },
+            (res) => {
+              if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+              } else {
+                resolve(res);
+              }
+            }
+          );
         });
-      }
 
-      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-        chrome.runtime.sendMessage({
-          type: 'ITEM_TRACKED',
-          payload: data,
-        }).catch(() => {});
+        if (swResponse?.success) {
+          console.log('[Price Ghost] 👻 Tracked product successfully via Service Worker:', product.title);
+          return true;
+        }
+      } catch (swErr) {
+        console.warn('[Price Ghost] Service worker track message failed, falling back to direct fetch:', swErr.message);
       }
-      return true;
-    } else {
-      const errText = await response.text();
-      console.warn('[Price Ghost] Backend returned status:', response.status, errText);
-      return false;
     }
+
+    // 2. Direct fetch fallback
+    const candidateBases = [
+      API_BASE_URL,
+      'https://price-ghost.netlify.app/api',
+      'https://price-ghost.onrender.com/api',
+    ];
+
+    for (const base of candidateBases) {
+      try {
+        const response = await fetch(`${base.replace(/\/+$/, '')}/items/track`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('[Price Ghost] 👻 Tracked product successfully:', data.item?.title || product.title);
+
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            chrome.storage.local.get(['trackedKeys'], (res) => {
+              const trackedKeys = res.trackedKeys || {};
+              const key = `${product.platform}:${product.externalId}`;
+              trackedKeys[key] = {
+                itemId: data.item?._id,
+                targetPercentageDrop: defaultThreshold || 10,
+                trackedAt: Date.now(),
+              };
+              chrome.storage.local.set({ trackedKeys });
+            });
+          }
+
+          if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+            chrome.runtime.sendMessage({
+              type: 'ITEM_TRACKED',
+              payload: data,
+            }).catch(() => {});
+          }
+          return true;
+        }
+      } catch {
+        // Try next candidate
+      }
+    }
+
+    return false;
   } catch (err) {
     console.warn('[Price Ghost] Backend connection error:', err.message);
     return false;

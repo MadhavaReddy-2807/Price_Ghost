@@ -3,37 +3,44 @@ import { ENV } from '../config/env.js';
 
 let transporter = null;
 
-function getTransporter() {
+/**
+ * Resets cached transporter so subsequent attempts create a fresh socket connection.
+ */
+export function resetTransporter() {
+  transporter = null;
+}
+
+export function getTransporter() {
   if (!transporter && ENV.SMTP_USER && ENV.SMTP_PASS) {
     const cleanPass = String(ENV.SMTP_PASS).replace(/\s+/g, '');
-    const isGmail =
-      (ENV.SMTP_HOST && ENV.SMTP_HOST.includes('gmail')) ||
-      (ENV.SMTP_USER && ENV.SMTP_USER.includes('@gmail.com'));
+    const port = parseInt(ENV.SMTP_PORT || '587', 10);
+    const host = ENV.SMTP_HOST || 'smtp.gmail.com';
+    const isPort587 = port === 587;
 
-    const transportOptions = isGmail
+    const transportOptions = isPort587
       ? {
-          service: 'gmail',
+          host,
+          port: 587,
+          secure: false, // STARTTLS
           auth: {
             user: ENV.SMTP_USER,
             pass: cleanPass,
           },
-          family: 4, // Force IPv4 to prevent IPv6 socket connection timeouts on cloud/Docker hosts
-          connectionTimeout: 15000,
-          greetingTimeout: 15000,
-          socketTimeout: 20000,
+          connectionTimeout: 30000,
+          greetingTimeout: 30000,
+          socketTimeout: 35000,
         }
       : {
-          host: ENV.SMTP_HOST || 'smtp.gmail.com',
-          port: parseInt(ENV.SMTP_PORT || '587', 10),
-          secure: parseInt(ENV.SMTP_PORT, 10) === 465,
+          host,
+          port: 465,
+          secure: true,
           auth: {
             user: ENV.SMTP_USER,
             pass: cleanPass,
           },
-          family: 4,
-          connectionTimeout: 15000,
-          greetingTimeout: 15000,
-          socketTimeout: 20000,
+          connectionTimeout: 30000,
+          greetingTimeout: 30000,
+          socketTimeout: 35000,
         };
 
     transporter = nodemailer.createTransport(transportOptions);
@@ -239,6 +246,36 @@ export async function sendPriceDropEmail({
     return { success: true, messageId: info.messageId };
   } catch (error) {
     console.error(`[Email Service Error] Failed to send email to ${user.email}:`, error.message);
+    resetTransporter(); // Ensure stale connection is destroyed
+
+    // If it was a network timeout or connection reset, retry once with a fresh socket
+    const isNetworkGlitch =
+      error.message &&
+      (error.message.includes('timeout') ||
+        error.message.includes('ECONN') ||
+        error.message.includes('ETIMEDOUT') ||
+        error.message.includes('ESOCKET'));
+
+    if (isNetworkGlitch) {
+      try {
+        console.log(`[Email Service] Retrying send to ${user.email} with fresh connection...`);
+        const freshClient = getTransporter();
+        if (freshClient) {
+          const retryInfo = await freshClient.sendMail({
+            from: ENV.SMTP_FROM,
+            to: user.email,
+            subject,
+            html,
+          });
+          console.log(`[Email Service] ✅ Retry successful for ${user.email} (Message ID: ${retryInfo.messageId})`);
+          return { success: true, messageId: retryInfo.messageId };
+        }
+      } catch (retryErr) {
+        console.error(`[Email Service Error] Immediate retry also failed for ${user.email}:`, retryErr.message);
+        resetTransporter();
+      }
+    }
+
     return { success: false, error: error.message };
   }
 }

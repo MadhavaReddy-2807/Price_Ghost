@@ -115,7 +115,7 @@ router.get('/mail-queue', authMiddleware, async (req, res) => {
 // POST /api/user/mail-queue/process — Trigger immediate processing of pending mail queue
 router.post('/mail-queue/process', authMiddleware, async (req, res) => {
   try {
-    const result = await processUserMailQueue(req.user.userId);
+    const result = await processUserMailQueue(req.user.userId, { force: true });
     return res.json({
       success: true,
       message: `Processed ${result.processed} email(s): ${result.sent} sent, ${result.failed} failed.`,

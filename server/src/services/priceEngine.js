@@ -89,6 +89,7 @@ export function shouldNotifyUser({
   quietHoursStart,
   quietHoursEnd,
   date = new Date(),
+  ignoreQuietHours = false,
 }) {
   if (currentPrice <= 0 || baselinePrice <= 0) return false;
 
@@ -108,10 +109,79 @@ export function shouldNotifyUser({
     }
   }
 
-  // Quiet hours suppression
-  if (quietHoursStart && quietHoursEnd && isInQuietHours(quietHoursStart, quietHoursEnd, date)) {
+  // Quiet hours suppression (only if not explicitly ignored for persistent queueing)
+  if (!ignoreQuietHours && quietHoursStart && quietHoursEnd && isInQuietHours(quietHoursStart, quietHoursEnd, date)) {
     return false;
   }
 
   return true;
+}
+
+/**
+ * Returns the timestamp of the most recently sent email from the user's mail queue.
+ * @param {Object} user
+ * @returns {Date|null}
+ */
+export function getLastSentEmailTimestamp(user) {
+  if (!user || !user.mailQueue || user.mailQueue.length === 0) return null;
+  const sentJobs = user.mailQueue.filter((j) => j.status === 'sent' && j.sentAt);
+  if (sentJobs.length === 0) return null;
+  return new Date(Math.max(...sentJobs.map((j) => new Date(j.sentAt).getTime())));
+}
+
+/**
+ * Evaluates whether a user's mail queue is eligible for delivery according to:
+ * 1. Quiet hours window (e.g. 22:00 - 08:00)
+ * 2. User-configured batch frequency schedule ('realtime', '6h', '12h', '24h')
+ *
+ * @param {Object} user
+ * @param {Date} [date=new Date()]
+ * @returns {{ eligible: boolean, reason?: string, inQuietHours?: boolean, remainingMinutes?: number, frequency?: string }}
+ */
+export function isUserEligibleForScheduledDelivery(user, date = new Date()) {
+  if (!user || user.notifications?.email === false) {
+    return { eligible: false, reason: 'Email alerts disabled in user preferences.' };
+  }
+
+  // 1. Quiet Hours check
+  const { quietHoursStart, quietHoursEnd } = user.notifications || {};
+  if (quietHoursStart && quietHoursEnd && isInQuietHours(quietHoursStart, quietHoursEnd, date)) {
+    return {
+      eligible: false,
+      reason: `Quiet hours active (${quietHoursStart} - ${quietHoursEnd}). Delivery deferred in queue.`,
+      inQuietHours: true,
+    };
+  }
+
+  // 2. Frequency schedule check
+  const frequency = user.notifications?.frequency || 'realtime';
+  if (frequency === 'realtime') {
+    return { eligible: true, frequency: 'realtime' };
+  }
+
+  const frequencyCooldownMs = {
+    '6h': 6 * 60 * 60 * 1000,
+    '12h': 12 * 60 * 60 * 1000,
+    '24h': 24 * 60 * 60 * 1000,
+  }[frequency];
+
+  if (!frequencyCooldownMs) {
+    return { eligible: true, frequency };
+  }
+
+  const lastSentAt = getLastSentEmailTimestamp(user);
+  if (lastSentAt) {
+    const elapsedMs = date.getTime() - lastSentAt.getTime();
+    if (elapsedMs < frequencyCooldownMs) {
+      const remainingMinutes = Math.ceil((frequencyCooldownMs - elapsedMs) / (60 * 1000));
+      return {
+        eligible: false,
+        reason: `Mailing schedule (${frequency}) active. Next batch in ${remainingMinutes}m.`,
+        remainingMinutes,
+        frequency,
+      };
+    }
+  }
+
+  return { eligible: true, frequency };
 }

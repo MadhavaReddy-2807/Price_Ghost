@@ -52,7 +52,7 @@ async function getTrackingStatus(product) {
 }
 
 /**
- * Sends track request to backend.
+ * Sends track request to backend (delegates to Service Worker to bypass web-page CSP & CORS).
  */
 async function trackProductWithBackend(product, token, dropPercentage) {
   const payload = {
@@ -61,49 +61,131 @@ async function trackProductWithBackend(product, token, dropPercentage) {
     baseline: 'initial',
   };
 
-  const response = await fetch(`${API_BASE_URL}/items/track`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  // 1. First choice: delegate to Extension Service Worker (immune to host page CSP/CORS)
+  if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+    try {
+      const swResponse = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          {
+            type: 'TRACK_ITEM',
+            payload,
+            token,
+          },
+          (res) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve(res);
+            }
+          }
+        );
+      });
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || `Failed with status ${response.status}`);
-  }
-
-  const result = await response.json();
-
-  // Save to trackedKeys in storage
-  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-    chrome.storage.local.get(['trackedKeys'], (res) => {
-      const trackedKeys = res.trackedKeys || {};
-      const key = `${product.platform}:${product.externalId}`;
-      trackedKeys[key] = {
-        itemId: result.item?._id,
-        targetPercentageDrop: dropPercentage,
-        targetPrice: result.tracking?.targetPrice || calculateTargetPrice(product.currentPrice, dropPercentage),
-        baselinePrice: product.currentPrice,
-        trackedAt: Date.now(),
-      };
-      chrome.storage.local.set({ trackedKeys });
-    });
-
-    if (chrome.runtime?.sendMessage) {
-      chrome.runtime.sendMessage({ type: 'ITEM_TRACKED', payload: result }).catch(() => {});
+      if (swResponse) {
+        if (swResponse.success) {
+          return swResponse.data;
+        } else {
+          throw new Error(swResponse.error || 'Failed to track product.');
+        }
+      }
+    } catch (swErr) {
+      if (swErr.message?.includes('Extension context invalidated')) {
+        throw new Error('Price Ghost extension was reloaded. Please refresh this page.');
+      }
+      console.warn('[Price Ghost] Service worker track failed, attempting direct fetch fallback:', swErr.message);
     }
   }
 
-  return result;
+  // 2. Direct fallback (Render direct -> Netlify proxy)
+  const candidateBases = [
+    API_BASE_URL,
+    'https://price-ghost.netlify.app/api',
+    'https://price-ghost.onrender.com/api',
+  ];
+
+  let lastErr = null;
+  for (const base of candidateBases) {
+    try {
+      const response = await fetch(`${base.replace(/\/+$/, '')}/items/track`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (response.ok) {
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          chrome.storage.local.get(['trackedKeys'], (res) => {
+            const trackedKeys = res.trackedKeys || {};
+            const key = `${product.platform}:${product.externalId}`;
+            trackedKeys[key] = {
+              itemId: result.item?._id,
+              targetPercentageDrop: dropPercentage,
+              targetPrice: result.tracking?.targetPrice || calculateTargetPrice(product.currentPrice, dropPercentage),
+              baselinePrice: product.currentPrice,
+              trackedAt: Date.now(),
+            };
+            chrome.storage.local.set({ trackedKeys });
+          });
+
+          if (chrome.runtime?.sendMessage) {
+            chrome.runtime.sendMessage({ type: 'ITEM_TRACKED', payload: result }).catch(() => {});
+          }
+        }
+        return result;
+      } else {
+        throw new Error(result.error || `Server responded with status ${response.status}`);
+      }
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
+  throw lastErr || new Error('Failed to connect to Price Ghost tracker service.');
 }
 
 /**
- * Untracks product from backend.
+ * Untracks product from backend (delegates to Service Worker to bypass web-page CSP & CORS).
  */
 async function untrackProductWithBackend(itemId, product, token) {
+  // 1. First choice: delegate to Extension Service Worker
+  if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+    try {
+      const swResponse = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          {
+            type: 'UNTRACK_ITEM',
+            itemId,
+            platform: product?.platform,
+            externalId: product?.externalId,
+            token,
+          },
+          (res) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve(res);
+            }
+          }
+        );
+      });
+
+      if (swResponse) {
+        if (swResponse.success) return swResponse.data;
+        throw new Error(swResponse.error || 'Failed to untrack item.');
+      }
+    } catch (swErr) {
+      if (swErr.message?.includes('Extension context invalidated')) {
+        throw new Error('Price Ghost extension was reloaded. Please refresh this page.');
+      }
+      console.warn('[Price Ghost] Service worker untrack failed, attempting direct fetch fallback:', swErr.message);
+    }
+  }
+
+  // 2. Direct fallback
   const response = await fetch(`${API_BASE_URL}/items/untrack/${itemId}`, {
     method: 'DELETE',
     headers: {
@@ -112,7 +194,7 @@ async function untrackProductWithBackend(itemId, product, token) {
   });
 
   if (!response.ok) {
-    throw new Error('Failed to untrack item');
+    throw new Error('Failed to untrack item.');
   }
 
   // Remove from local trackedKeys

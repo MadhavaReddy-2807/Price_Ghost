@@ -51,6 +51,210 @@ export function getCronExpression(intervalMinutes) {
   return `0 0 */${days} * *`;
 }
 
+// Tracks active user price checks to ensure per-user isolation without blocking other users or the global poller
+const activeUserPolls = new Set();
+
+/**
+ * Checks prices specifically and exclusively for a single user's tracked products.
+ * This runs completely isolated from the global background poller and does not block other users.
+ * @param {string|import('mongoose').Types.ObjectId} userId
+ * @param {Object} [options]
+ * @param {number} [options.itemDelayMs=1000]
+ */
+export async function checkUserPrices(userId, options = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    return {
+      success: false,
+      isRunning: false,
+      message: 'Database is currently connecting. Please try again in a few moments.',
+    };
+  }
+
+  const lockKey = userId.toString();
+  if (activeUserPolls.has(lockKey)) {
+    return {
+      success: false,
+      isRunning: true,
+      message: 'Your price checking cycle is already actively running. Please wait for it to complete.',
+    };
+  }
+
+  activeUserPolls.add(lockKey);
+  const startTime = Date.now();
+  const itemDelayMs = options.itemDelayMs != null ? options.itemDelayMs : 1000;
+
+  console.log(`\n[User Poller] ==================== USER PRICE CHECK ====================`);
+  console.log(`[User Poller] User ID: ${lockKey} at ${new Date().toISOString()}`);
+
+  let itemsChecked = 0;
+  let priceChangesDetected = 0;
+  let alertsSent = 0;
+  let errorCount = 0;
+
+  try {
+    const user = await UserModel.findById(userId);
+    if (!user || !user.trackedItems || user.trackedItems.length === 0) {
+      return {
+        success: true,
+        itemsChecked: 0,
+        priceChangesDetected: 0,
+        alertsSent: 0,
+        errorCount: 0,
+        durationSeconds: 0,
+        totalUserItems: 0,
+        message: 'You have no tracked products to check yet.',
+      };
+    }
+
+    const itemIds = user.trackedItems.map((t) => t.itemId).filter(Boolean);
+    const items = await ItemModel.find({ _id: { $in: itemIds } });
+
+    if (items.length === 0) {
+      return {
+        success: true,
+        itemsChecked: 0,
+        priceChangesDetected: 0,
+        alertsSent: 0,
+        errorCount: 0,
+        durationSeconds: 0,
+        totalUserItems: 0,
+        message: 'No tracked products found in catalog.',
+      };
+    }
+
+    console.log(`[User Poller] Checking ${items.length} item(s) specifically for user ${user.email}`);
+
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
+      itemsChecked++;
+
+      console.log(
+        `[User Poller] [${index + 1}/${items.length}] Checking [${item.platform}] "${item.title.slice(0, 35)}..." (ID: ${item._id})`
+      );
+
+      try {
+        const scraped = await scrapeProduct(item.url, item.platform);
+        const oldPrice = item.currentPrice;
+        const newPrice = scraped.currentPrice;
+        item.lastCheckedAt = new Date();
+        item.inStock = scraped.inStock;
+
+        if (scraped.mrpPrice && scraped.mrpPrice > 0) {
+          item.mrpPrice = scraped.mrpPrice;
+        }
+
+        if (newPrice > 0 && newPrice !== oldPrice) {
+          priceChangesDetected++;
+          const priceDiff = newPrice - oldPrice;
+          const pctChange = calculateDropPercentage(oldPrice, newPrice);
+
+          console.log(
+            `[User Poller] 🚨 Price change detected for "${item.title}": ₹${oldPrice} -> ₹${newPrice} (${priceDiff > 0 ? '+' : ''}₹${priceDiff}, -${pctChange}%)`
+          );
+
+          item.currentPrice = newPrice;
+          item.lowestPrice = Math.min(item.lowestPrice, newPrice);
+          item.highestPrice = Math.max(item.highestPrice, newPrice);
+          item.lastPriceChangeAt = new Date();
+          item.priceHistory.push({ price: newPrice, timestamp: new Date() });
+          while (item.priceHistory.length > 365) {
+            item.priceHistory.shift();
+          }
+          await item.save();
+
+          // Evaluate alerts for subscribers of this item
+          const subscribers = await UserModel.find({
+            'trackedItems.itemId': item._id,
+            'notifications.email': true,
+          });
+
+          for (const sub of subscribers) {
+            const tracking = sub.trackedItems.find(
+              (t) => t.itemId.toString() === item._id.toString()
+            );
+            if (!tracking) continue;
+
+            const baselinePrice =
+              tracking.baseline === 'mrp' && item.mrpPrice > 0
+                ? item.mrpPrice
+                : tracking.baselinePrice;
+
+            const shouldNotify = shouldNotifyUser({
+              currentPrice: newPrice,
+              baselinePrice,
+              targetPercentageDrop: tracking.targetPercentageDrop,
+              lastNotifiedPrice: tracking.lastNotifiedPrice,
+              lastNotifiedAt: tracking.lastNotifiedAt,
+              quietHoursStart: sub.notifications?.quietHoursStart,
+              quietHoursEnd: sub.notifications?.quietHoursEnd,
+              ignoreQuietHours: true, // Always enqueue into mailQueue; delivery schedule defers if in quiet hours
+            });
+
+            if (shouldNotify) {
+              const dropPercent = calculateDropPercentage(baselinePrice, newPrice);
+              try {
+                await enqueueUserEmail(sub._id, {
+                  type: 'price_drop_alert',
+                  subject: `📉 Price Drop Alert: ${item.title.slice(0, 50)}...`,
+                  payload: {
+                    itemId: item._id,
+                    itemTitle: item.title,
+                    itemUrl: item.url,
+                    itemImage: item.imageUrl,
+                    platform: item.platform,
+                    baselinePrice,
+                    currentPrice: newPrice,
+                    dropPercentage: dropPercent,
+                    savings: Math.max(0, baselinePrice - newPrice),
+                  },
+                });
+
+                // Deliver immediately if user is eligible (realtime & not in quiet hours), otherwise defer in queue
+                const queueRes = await processUserMailQueue(sub._id, { force: false });
+                if (queueRes.sent > 0) {
+                  alertsSent += queueRes.sent;
+                }
+              } catch (qErr) {
+                console.warn(`[User Poller Warning] Mail queue error for ${sub.email}:`, qErr.message);
+              }
+            }
+          }
+        } else {
+          await item.save();
+        }
+      } catch (err) {
+        errorCount++;
+        console.warn(`[User Poller Warning] Failed checking "${item.title}": ${err.message}`);
+        item.lastCheckedAt = new Date();
+        await item.save().catch(() => {});
+      }
+
+      if (index < items.length - 1 && itemDelayMs > 0) {
+        await sleep(itemDelayMs);
+      }
+    }
+
+    const durationSeconds = parseFloat(((Date.now() - startTime) / 1000).toFixed(2));
+    console.log(
+      `[User Poller] Completed in ${durationSeconds}s: ${itemsChecked} checked, ${priceChangesDetected} changed, ${alertsSent} alerts, ${errorCount} errors.`
+    );
+    console.log(`[User Poller] ========================================================\n`);
+
+    return {
+      success: true,
+      itemsChecked,
+      priceChangesDetected,
+      alertsSent,
+      errorCount,
+      durationSeconds,
+      totalUserItems: itemIds.length,
+      message: `Checked ${itemsChecked} product(s) in ${durationSeconds}s. Found ${priceChangesDetected} price change(s) and sent ${alertsSent} alert(s).`,
+    };
+  } finally {
+    activeUserPolls.delete(lockKey);
+  }
+}
+
 /**
  * Runs a single cycle of the price polling engine across items.
  * @param {Object} options
@@ -102,8 +306,20 @@ export async function runPollerCycle(options = {}) {
       debugLog(`Querying database for ${options.itemIds.length} specified items...`);
       items = await ItemModel.find({ _id: { $in: options.itemIds } });
     } else {
-      debugLog(`Querying database for up to ${batchSize} oldest-checked items...`);
-      items = await ItemModel.find({}).sort({ lastCheckedAt: 1 }).limit(batchSize);
+      // Global poller: query all active tracked products across the system
+      const query = {
+        $or: [
+          { trackerCount: { $gt: 0 } },
+          { trackerCount: { $exists: false } },
+        ],
+      };
+      if (options.batchSize && options.batchSize > 0) {
+        debugLog(`Querying database for up to ${options.batchSize} oldest-checked items...`);
+        items = await ItemModel.find(query).sort({ lastCheckedAt: 1 }).limit(options.batchSize);
+      } else {
+        debugLog(`Global Poller: Checking ALL active tracked items across the system...`);
+        items = await ItemModel.find(query).sort({ lastCheckedAt: 1 });
+      }
     }
 
     if (items.length === 0) {
@@ -217,6 +433,7 @@ export async function runPollerCycle(options = {}) {
               lastNotifiedAt: tracking.lastNotifiedAt,
               quietHoursStart: user.notifications?.quietHoursStart,
               quietHoursEnd: user.notifications?.quietHoursEnd,
+              ignoreQuietHours: true, // Always enqueue into mailQueue; delivery schedule defers if in quiet hours
             });
 
             debugLog(
@@ -244,11 +461,13 @@ export async function runPollerCycle(options = {}) {
                   },
                 });
 
-                // Process pending emails in the user's mailing queue
-                const queueResult = await processUserMailQueue(user._id);
+                // Deliver immediately if user is eligible (realtime & not in quiet hours), otherwise defer in queue
+                const queueResult = await processUserMailQueue(user._id, { force: false });
                 if (queueResult.sent > 0) {
                   alertsSent += queueResult.sent;
                   console.log(`[Poller] 📧 Sent ${queueResult.sent} alert email(s) from user mail queue to ${user.email}`);
+                } else if (queueResult.deferred) {
+                  console.log(`[Poller] ⏳ Queued alert deferred for ${user.email}: ${queueResult.reason}`);
                 }
               } catch (queueErr) {
                 console.warn(`[Poller Warning] Mail queue error for ${user.email}: ${queueErr.message}`);
@@ -328,8 +547,9 @@ export async function runPollerCycle(options = {}) {
 
 /**
  * Returns current poller status, running state, and schedule.
+ * @param {string|import('mongoose').Types.ObjectId} [userId]
  */
-export function getPollerStatus() {
+export function getPollerStatus(userId) {
   let nextRunEstimate = null;
   if (autoPollEnabled) {
     const baseTime = lastCycleFinishedAt || lastCycleStartedAt || new Date();
@@ -338,6 +558,7 @@ export function getPollerStatus() {
 
   return {
     isRunning: isPollerRunning,
+    userChecking: userId ? activeUserPolls.has(userId.toString()) : false,
     lastCycleStartedAt,
     lastCycleFinishedAt,
     lastCycleStats,
@@ -376,7 +597,7 @@ export function updatePollerConfig({ enabled, intervalMinutes }) {
     );
     activeCronTask = cron.schedule(cronExpression, () => {
       debugLog(`Cron schedule "${cronExpression}" triggered at ${new Date().toISOString()}`);
-      runPollerCycle().catch(() => {});
+      runPollerCycle({ all: true }).catch(() => {});
     });
   } else {
     console.log(`[Poller Scheduler] Automatic background polling paused.`);
@@ -393,6 +614,12 @@ export function startPollerScheduler() {
   const cronExpression = getCronExpression(currentIntervalMinutes);
   const hours = (currentIntervalMinutes / 60).toFixed(1);
 
+  // Clear existing task if previously registered to avoid duplicates
+  if (activeCronTask) {
+    activeCronTask.stop();
+    activeCronTask = null;
+  }
+
   console.log(
     `[Poller Scheduler] Active. Scheduled to run every ${currentIntervalMinutes} minutes (~${hours} hrs) [Cron: "${cronExpression}"]`
   );
@@ -404,8 +631,8 @@ export function startPollerScheduler() {
   if (startupDelayMs > 0) {
     console.log(`[Poller Scheduler] Initial startup price check scheduled in ${startupDelayMs / 1000}s...`);
     setTimeout(() => {
-      console.log('[Poller Scheduler] Triggering initial startup price check...');
-      runPollerCycle().catch(() => {});
+      console.log('[Poller Scheduler] Triggering initial startup price check across all tracked items...');
+      runPollerCycle({ all: true }).catch(() => {});
     }, startupDelayMs);
   } else {
     debugLog('Startup immediate cycle check is disabled (POLL_STARTUP_DELAY_MS <= 0).');
@@ -413,7 +640,7 @@ export function startPollerScheduler() {
 
   activeCronTask = cron.schedule(cronExpression, () => {
     debugLog(`Cron schedule "${cronExpression}" triggered at ${new Date().toISOString()}`);
-    runPollerCycle().catch(() => {});
+    runPollerCycle({ all: true }).catch(() => {});
   });
 
   return activeCronTask;

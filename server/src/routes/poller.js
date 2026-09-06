@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { UserModel } from '../models/User.js';
-import { getPollerStatus, runPollerCycle, updatePollerConfig } from '../services/poller.js';
+import { getPollerStatus, runPollerCycle, updatePollerConfig, checkUserPrices } from '../services/poller.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -12,7 +12,7 @@ router.use(authMiddleware);
  */
 router.get('/status', (req, res) => {
   try {
-    const status = getPollerStatus();
+    const status = getPollerStatus(req.user?.userId);
     return res.json(status);
   } catch (error) {
     return res.status(500).json({ error: 'Failed to get poller status', details: error.message });
@@ -28,45 +28,42 @@ router.get('/status', (req, res) => {
 router.post('/trigger', async (req, res) => {
   try {
     const mode = req.body?.mode || 'user';
-    const currentStatus = getPollerStatus();
-
-    if (currentStatus.isRunning) {
-      return res.status(409).json({
-        success: false,
-        isRunning: true,
-        message: 'A price checking cycle is already actively running. Please wait for it to complete.',
-      });
-    }
 
     if (mode === 'user') {
-      const user = await UserModel.findById(req.user.userId);
-      if (!user || !user.trackedItems || user.trackedItems.length === 0) {
-        return res.json({
-          success: true,
-          itemsChecked: 0,
-          priceChangesDetected: 0,
-          alertsSent: 0,
-          message: 'You have no tracked products to check yet.',
-        });
-      }
-
-      const itemIds = user.trackedItems.map((t) => t.itemId).filter(Boolean);
-
-      // Trigger cycle with reduced delay for instant user feedback
-      const result = await runPollerCycle({
-        itemIds,
-        itemDelayMs: 1200,
+      // User-specific isolated price check: checks only this user's tracked items without locking out others
+      const result = await checkUserPrices(req.user.userId, {
+        itemDelayMs: 1000,
       });
+
+      if (!result.success && result.isRunning) {
+        return res.status(409).json(result);
+      }
 
       return res.json({
         ...result,
         mode: 'user',
-        totalUserItems: itemIds.length,
       });
     } else {
-      // Full queue poll across all oldest items
+      // Full queue poll across all tracked items - restricted to administrators
+      if (req.user?.role !== 'admin') {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'Only administrators can trigger full-queue global polling.',
+        });
+      }
+
+      const currentStatus = getPollerStatus();
+      if (currentStatus.isRunning) {
+        return res.status(409).json({
+          success: false,
+          isRunning: true,
+          message: 'A global polling cycle is already actively executing. Please wait for it to complete.',
+        });
+      }
+
       const result = await runPollerCycle({
-        itemDelayMs: 3000,
+        all: true,
+        itemDelayMs: 2500,
       });
 
       return res.json({
@@ -82,13 +79,20 @@ router.post('/trigger', async (req, res) => {
 
 /**
  * POST /api/poller/config
- * Updates automatic background polling schedule or pauses/resumes it.
+ * Updates automatic background polling schedule or pauses/resumes it (Admin only).
  * Body:
  *   - enabled: boolean (optional)
  *   - intervalMinutes: number (optional, e.g. 15, 30, 60, 180, 360, 720)
  */
 router.post('/config', (req, res) => {
   try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Only administrators can configure background polling schedules.',
+      });
+    }
+
     const { enabled, intervalMinutes } = req.body || {};
     const updatedStatus = updatePollerConfig({
       enabled: typeof enabled === 'boolean' ? enabled : undefined,

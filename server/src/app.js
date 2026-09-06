@@ -61,6 +61,15 @@ const corsOptions = {
       return callback(null, true);
     }
 
+    // 6. Allow supported shopping platform origins for browser extension content scripts
+    if (
+      cleanOrigin.includes('amazon.') ||
+      cleanOrigin.includes('flipkart.') ||
+      cleanOrigin.includes('myntra.')
+    ) {
+      return callback(null, true);
+    }
+
     // Safely reject origin without throwing a 500 error
     console.warn(`[CORS Blocked] Origin: ${origin}`);
     return callback(null, false);
