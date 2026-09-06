@@ -136,15 +136,23 @@ export async function processUserMailQueue(userId, options = {}) {
   try {
     const user = await UserModel.findById(userId);
     if (!user) {
+      console.warn(`[Mail Queue] ⚠️ Cannot process queue: User ${userId} not found.`);
       return { processed: 0, sent: 0, failed: 0 };
     }
 
     if (user.notifications?.email === false) {
+      console.log(`[Mail Queue] 🔕 Email alerts disabled for user ${user.email}, skipping queue processing.`);
       return { processed: 0, sent: 0, failed: 0 };
     }
 
+    const totalQueueCount = (user.mailQueue || []).length;
     const pendingJobs = (user.mailQueue || []).filter((job) => job.status === 'pending');
     if (pendingJobs.length === 0) {
+      if (totalQueueCount === 0) {
+        console.log(`[Mail Queue] 📭 Queue checked for user ${user.email} — mail queue is empty, no items present.`);
+      } else {
+        console.log(`[Mail Queue] 📭 Queue checked for user ${user.email} — no pending items present to process (${totalQueueCount} total items in history).`);
+      }
       return { processed: 0, sent: 0, failed: 0 };
     }
 
@@ -297,10 +305,11 @@ export async function processAllPendingMailQueues(options = {}) {
   });
 
   if (usersWithPending.length === 0) {
+    console.log('[Mail Queue Worker] 📭 Queue sweep complete — no pending items present across all users.');
     return { totalUsers: 0, totalProcessed: 0, totalSent: 0, totalFailed: 0, totalDeferred: 0 };
   }
 
-  console.log(`[Mail Queue Worker] Found ${usersWithPending.length} user(s) with pending emails.`);
+  console.log(`[Mail Queue Worker] 📬 Queue sweep found ${usersWithPending.length} user(s) with pending emails.`);
 
   let totalProcessed = 0;
   let totalSent = 0;
@@ -332,6 +341,7 @@ export async function processAllPendingMailQueues(options = {}) {
 export async function getUserMailQueue(userId, limit = 50) {
   const user = await UserModel.findById(userId);
   if (!user) {
+    console.warn(`[Mail Queue] ⚠️ Cannot fetch mail queue: User ${userId} not found.`);
     throw new Error(`User ${userId} not found`);
   }
 
@@ -344,6 +354,14 @@ export async function getUserMailQueue(userId, limit = 50) {
     sent: queue.filter((j) => j.status === 'sent').length,
     failed: queue.filter((j) => j.status === 'failed').length,
   };
+
+  if (queue.length === 0) {
+    console.log(`[Mail Queue] 📭 Mail queue fetched for user ${user.email} (ID: ${user._id}) — no items present in queue.`);
+  } else {
+    console.log(
+      `[Mail Queue] 📬 Mail queue fetched for user ${user.email} (ID: ${user._id}) — ${queue.length} item(s) present (pending: ${stats.pending}, sent: ${stats.sent}, failed: ${stats.failed}).`
+    );
+  }
 
   return {
     stats,
@@ -359,6 +377,7 @@ export async function getUserMailQueue(userId, limit = 50) {
 export async function retryFailedUserQueue(userId, queueItemId = null) {
   const user = await UserModel.findById(userId);
   if (!user) {
+    console.warn(`[Mail Queue] ⚠️ Cannot retry mail queue: User ${userId} not found.`);
     throw new Error(`User ${userId} not found`);
   }
 
@@ -374,11 +393,12 @@ export async function retryFailedUserQueue(userId, queueItemId = null) {
 
   if (resetCount > 0) {
     await user.save();
-    console.log(`[Mail Queue] Reset ${resetCount} failed email(s) to pending for ${user.email}. Processing now...`);
+    console.log(`[Mail Queue] 🔄 Reset ${resetCount} failed email(s) to pending for ${user.email}. Processing now...`);
     const processResult = await processUserMailQueue(user._id, { force: true });
     return { resetCount, ...processResult };
   }
 
+  console.log(`[Mail Queue] ℹ️ Retry requested for user ${user.email} — no failed items present in queue.`);
   return { resetCount: 0, processed: 0, sent: 0, failed: 0 };
 }
 
