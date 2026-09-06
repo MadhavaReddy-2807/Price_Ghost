@@ -24,8 +24,8 @@ export default function InstallExtension() {
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
           <a
-            href="/price-ghost-extension.zip"
-            download="price-ghost-extension.zip"
+            href="/extension.zip"
+            download="extension.zip"
             className="inline-flex items-center px-6 py-3 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-sm rounded-xl shadow-md transition transform hover:-translate-y-0.5"
           >
             <Download className="w-4 h-4 mr-2" />
@@ -46,7 +46,7 @@ export default function InstallExtension() {
             Download the pre-configured extension ZIP file above and extract it into a folder on your computer.
           </p>
           <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-indigo-700 break-all select-all">
-            price-ghost-extension.zip → Extract All
+            extension.zip → Extract All
           </div>
         </div>
 
@@ -86,7 +86,7 @@ export default function InstallExtension() {
           </div>
           <h3 className="text-base font-bold text-slate-900">Load Unpacked</h3>
           <p className="text-sm text-slate-600 leading-relaxed">
-            Click the <strong className="text-indigo-600">"Load unpacked"</strong> button in the top-left corner, and select the <code>extension/dist</code> folder.
+            Click the <strong className="text-indigo-600">"Load unpacked"</strong> button in the top-left corner, and select the <code className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-bold">extension</code> folder.
           </p>
         </div>
       </div>

@@ -179,16 +179,23 @@ npm run dev
 
 ## 🧩 Loading the Chrome Extension
 
+### Option A: Using the Downloadable Package (Easiest)
+1. Download `extension.zip` from the dashboard Install page.
+2. Extract `extension.zip` to your computer (this produces the `extension` folder).
+3. Open Google Chrome and go to `chrome://extensions/`.
+4. Enable **Developer mode** via the toggle in the top-right corner.
+5. Click **Load unpacked** (top-left).
+6. Select the `extension` folder.
+7. Pin **Price Ghost** to your browser toolbar!
+
+### Option B: Building from Source
 1. Build the extension bundle:
    ```bash
    cd extension
    npm run build
    ```
-2. Open Google Chrome and go to `chrome://extensions/`.
-3. Enable **Developer mode** via the toggle in the top-right corner.
-4. Click **Load unpacked** (top-left).
-5. Select the `extension/dist` folder inside `Price_Ghost`.
-6. Pin **Price Ghost** to your browser toolbar!
+2. In `chrome://extensions/`, click **Load unpacked** and select the `extension` folder.
+3. Pin **Price Ghost** to your browser toolbar!
 
 ---
 

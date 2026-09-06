@@ -894,7 +894,7 @@ In Google Chrome:
 1. Navigate to `chrome://extensions/`.
 2. Enable **Developer mode** (top-right toggle).
 3. Click **Load unpacked**.
-4. Select the `extension/dist` folder.
+4. Select the `extension` folder.
 
 ---
 
