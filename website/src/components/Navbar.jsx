@@ -12,6 +12,7 @@ import {
   ExternalLink,
   Copy,
   Check,
+  ShieldCheck,
 } from 'lucide-react';
 
 export default function Navbar() {
@@ -96,6 +97,20 @@ export default function Navbar() {
                   <Puzzle className="w-4 h-4 mr-1.5" />
                   Extension
                 </Link>
+
+                {user?.role === 'admin' && (
+                  <Link
+                    to="/admin"
+                    className={`inline-flex items-center px-3 py-2 rounded-lg text-sm font-bold transition ${
+                      isActive('/admin')
+                        ? 'bg-purple-50 text-purple-700'
+                        : 'text-purple-600 hover:text-purple-900 hover:bg-purple-50/60'
+                    }`}
+                  >
+                    <ShieldCheck className="w-4 h-4 mr-1.5 text-purple-600" />
+                    Admin
+                  </Link>
+                )}
               </div>
             )}
           </div>
@@ -196,6 +211,15 @@ export default function Navbar() {
               >
                 Get Extension
               </Link>
+              {user?.role === 'admin' && (
+                <Link
+                  to="/admin"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block px-3 py-2 rounded-md text-base font-bold text-purple-700 bg-purple-50"
+                >
+                  Admin Portal
+                </Link>
+              )}
               <button
                 onClick={() => {
                   setMobileMenuOpen(false);

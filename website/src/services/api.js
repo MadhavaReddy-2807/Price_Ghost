@@ -72,4 +72,16 @@ export const pollerApi = {
   updateConfig: (config) => api.post('/poller/config', config),
 };
 
+// Admin API
+export const adminApi = {
+  getStats: () => api.get('/admin/stats'),
+  getUsers: (params) => api.get('/admin/users', { params }),
+  updateUserAccess: (userId, hasAccess) => api.patch(`/admin/users/${userId}/access`, { hasAccess }),
+  updateUserRole: (userId, role) => api.patch(`/admin/users/${userId}/role`, { role }),
+  deleteUser: (userId) => api.delete(`/admin/users/${userId}`),
+  getPoller: () => api.get('/admin/poller'),
+  updatePollerConfig: (config) => api.post('/admin/poller/config', config),
+  triggerPoller: (mode = 'all') => api.post('/admin/poller/trigger', { mode }),
+};
+
 export default api;

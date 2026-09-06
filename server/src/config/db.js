@@ -1,5 +1,13 @@
 import mongoose from 'mongoose';
+import dns from 'dns';
 import { ENV } from './env.js';
+
+// Resolve SRV records reliably on Windows environments
+try {
+  dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+} catch {
+  // Ignore in restricted environments
+}
 
 let isConnected = false;
 let isConnecting = false;

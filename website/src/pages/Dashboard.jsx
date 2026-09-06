@@ -24,8 +24,10 @@ import {
 } from 'lucide-react';
 import { itemsApi, dashboardApi, pollerApi } from '../services/api.js';
 import PriceChart from '../components/PriceChart.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Dashboard() {
+  const { user } = useAuth();
   const [trackedItems, setTrackedItems] = useState([]);
   const [summary, setSummary] = useState(null);
   const [alerts, setAlerts] = useState([]);
@@ -276,6 +278,48 @@ export default function Dashboard() {
       <div className="min-h-[70vh] flex flex-col items-center justify-center space-y-3">
         <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin" />
         <p className="text-sm text-slate-500 font-medium">Loading your tracking dashboard...</p>
+      </div>
+    );
+  }
+
+  // If user account is pending approval from administrator
+  if (user && user.hasAccess === false && user.role !== 'admin') {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-16 text-center space-y-6">
+        <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-3xl mx-auto flex items-center justify-center border border-amber-200/80 shadow-sm">
+          <Clock className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-amber-100/70 text-amber-800 text-xs font-bold">
+            <span>Pending Administrator Approval</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+            Account Awaiting Access Approval
+          </h1>
+          <p className="text-slate-600 text-sm max-w-lg mx-auto leading-relaxed">
+            Welcome to Price Ghost, <strong>{user.name || user.email}</strong>! Your account is registered, but an administrator has not granted access yet.
+          </p>
+        </div>
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs max-w-md mx-auto text-left text-sm space-y-3">
+          <div className="font-bold text-slate-900 flex items-center justify-between">
+            <span>Access Information</span>
+            <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md font-bold">Pending</span>
+          </div>
+          <p className="text-xs text-slate-500">
+            Once an administrator grants you access from the Admin Portal, you will immediately be able to track prices on Amazon, Flipkart, and Myntra and receive real-time drop alerts.
+          </p>
+          <div className="pt-3 border-t text-xs text-slate-400">
+            Account email: <span className="font-mono text-slate-700 font-semibold">{user.email}</span>
+          </div>
+        </div>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="inline-flex items-center px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl text-xs font-bold transition shadow-sm"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+          <span>Check Access Status</span>
+        </button>
       </div>
     );
   }

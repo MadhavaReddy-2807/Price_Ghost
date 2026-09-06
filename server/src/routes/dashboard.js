@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { UserModel } from '../models/User.js';
-import { authMiddleware } from '../middleware/auth.js';
+import { authMiddleware, requireAccessMiddleware } from '../middleware/auth.js';
 import { calculateDropPercentage } from '../services/priceEngine.js';
 
 const router = Router();
 router.use(authMiddleware);
+router.use(requireAccessMiddleware);
 
 // GET /api/dashboard/summary — High-level statistics
 router.get('/summary', async (req, res) => {

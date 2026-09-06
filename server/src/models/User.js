@@ -70,6 +70,17 @@ const UserSchema = new mongoose.Schema(
     trackedItems: [UserTrackedItemSchema],
     mailQueue: [MailQueueItemSchema],
     extensionInstalled: { type: Boolean, default: false },
+    role: {
+      type: String,
+      enum: ['admin', 'user'],
+      default: 'user',
+      index: true,
+    },
+    hasAccess: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   { timestamps: true }
 );

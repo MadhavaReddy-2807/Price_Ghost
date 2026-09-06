@@ -11,7 +11,11 @@ import userRoutes from './routes/user.js';
 import itemRoutes from './routes/items.js';
 import dashboardRoutes from './routes/dashboard.js';
 import pollerRoutes from './routes/poller.js';
+import adminRoutes from './routes/admin.js';
 import healthRoutes from './routes/health.js';
+import { UserModel } from './models/User.js';
+import { SystemSettingModel } from './models/SystemSetting.js';
+import { startPollerScheduler, updatePollerConfig } from './services/poller.js';
 
 const app = express();
 
@@ -132,6 +136,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/items', itemRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/poller', pollerRoutes);
+app.use('/api/admin', adminRoutes);
 
 // 404 Handler
 app.use((req, res) => {
@@ -149,7 +154,36 @@ app.use((err, req, res, next) => {
 
 async function bootstrap() {
   console.log('[Server] Starting Price Ghost Backend...');
-  connectDB().catch((err) => console.error('[Database Startup Notice]', err.message));
+  connectDB()
+    .then(async () => {
+      // Ensure all admin emails have role 'admin' and hasAccess true
+      if (ENV.ADMIN_EMAILS && ENV.ADMIN_EMAILS.length > 0) {
+        for (const email of ENV.ADMIN_EMAILS) {
+          await UserModel.updateMany(
+            { email: email.toLowerCase() },
+            { $set: { role: 'admin', hasAccess: true } }
+          );
+        }
+      }
+
+      // Restore persisted default poller settings if configured by admin
+      try {
+        const pollerSetting = await SystemSettingModel.findOne({ key: 'pollerConfig' });
+        if (pollerSetting && pollerSetting.value) {
+          updatePollerConfig({
+            enabled: pollerSetting.value.autoPollEnabled,
+            intervalMinutes: pollerSetting.value.intervalMinutes,
+          });
+          console.log(
+            `[Poller Scheduler] Restored admin config: every ${pollerSetting.value.intervalMinutes}m, enabled=${pollerSetting.value.autoPollEnabled}`
+          );
+        }
+      } catch (err) {
+        console.warn('[Poller Config Restore Notice]', err.message);
+      }
+    })
+    .catch((err) => console.error('[Database Startup Notice]', err.message));
+
   startPollerScheduler();
 
   app.listen(ENV.PORT, () => {

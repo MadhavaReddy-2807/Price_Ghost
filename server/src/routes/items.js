@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { ItemModel } from '../models/Item.js';
 import { UserModel } from '../models/User.js';
-import { authMiddleware } from '../middleware/auth.js';
+import { authMiddleware, requireAccessMiddleware } from '../middleware/auth.js';
 import { calculateTargetPrice, sanitizePriceString } from '../services/priceEngine.js';
 import { scrapeProduct, detectPlatform } from '../services/scraper/index.js';
 
 const router = Router();
 router.use(authMiddleware);
+router.use(requireAccessMiddleware);
 
 /**
  * Common helper to upsert canonical item and link it to the user's tracking list.

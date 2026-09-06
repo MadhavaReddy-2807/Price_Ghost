@@ -31,4 +31,8 @@ export const ENV = {
   POLL_STARTUP_DELAY_MS: parseInt(process.env.POLL_STARTUP_DELAY_MS || '30000', 10), // 30s delay on startup to prevent spamming
   POLL_DEBUG: process.env.POLL_DEBUG !== 'false', // Poller debug logs enabled by default
   MAX_CONCURRENT_REQUESTS: parseInt(process.env.MAX_CONCURRENT_REQUESTS || '3', 10),
+  ADMIN_EMAILS: (process.env.ADMIN_EMAILS || 'madhava2807@gmail.com')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean),
 };

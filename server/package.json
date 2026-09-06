@@ -10,7 +10,8 @@
     "seed": "node src/scripts/seed.js",
     "test": "node src/test_verify.js",
     "test:health": "node src/test_health_monitor.js",
-    "test:queue": "node src/test_mail_queue.js"
+    "test:queue": "node src/test_mail_queue.js",
+    "test:admin": "node src/test_admin.js"
   },
   "dependencies": {
     "axios": "^1.7.9",

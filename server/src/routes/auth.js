@@ -9,11 +9,14 @@ const router = Router();
 const googleClient = ENV.GOOGLE_CLIENT_ID ? new OAuth2Client(ENV.GOOGLE_CLIENT_ID) : null;
 
 function generateUserToken(user) {
+  const isAdmin = user.role === 'admin' || (user.email && ENV.ADMIN_EMAILS.includes(user.email.toLowerCase()));
   return jwt.sign(
     {
       userId: user._id.toString(),
       email: user.email,
       name: user.name,
+      role: isAdmin ? 'admin' : (user.role || 'user'),
+      hasAccess: isAdmin ? true : (user.hasAccess === true),
     },
     ENV.JWT_SECRET,
     { expiresIn: '30d' }
@@ -59,6 +62,7 @@ router.post('/google', async (req, res) => {
     const email = payload.email.toLowerCase().trim();
     const name = payload.name || payload.given_name || email.split('@')[0];
     const avatarUrl = payload.picture || '';
+    const isAdmin = ENV.ADMIN_EMAILS.includes(email);
 
     // Find user by either googleId or email
     let user = await UserModel.findOne({
@@ -71,6 +75,8 @@ router.post('/google', async (req, res) => {
         email,
         name,
         avatarUrl,
+        role: isAdmin ? 'admin' : 'user',
+        hasAccess: isAdmin ? true : false,
         notifications: {
           email: true,
           frequency: 'realtime',
@@ -81,6 +87,10 @@ router.post('/google', async (req, res) => {
       user.googleId = googleId;
       if (name) user.name = name;
       if (avatarUrl) user.avatarUrl = avatarUrl;
+      if (isAdmin) {
+        user.role = 'admin';
+        user.hasAccess = true;
+      }
       await user.save();
     }
 
@@ -93,6 +103,8 @@ router.post('/google', async (req, res) => {
         email: user.email,
         name: user.name,
         avatarUrl: user.avatarUrl,
+        role: user.role,
+        hasAccess: user.hasAccess,
         notifications: user.notifications,
         extensionInstalled: user.extensionInstalled,
       },
@@ -109,6 +121,13 @@ router.get('/me', authMiddleware, async (req, res) => {
     const user = await UserModel.findById(req.user.userId).select('-__v');
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
+    }
+    if (user.email && ENV.ADMIN_EMAILS.includes(user.email.toLowerCase())) {
+      if (user.role !== 'admin' || user.hasAccess !== true) {
+        user.role = 'admin';
+        user.hasAccess = true;
+        await user.save();
+      }
     }
     return res.json({ user });
   } catch (error) {
