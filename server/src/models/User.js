@@ -14,6 +14,42 @@ const UserTrackedItemSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const MailQueueItemSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: ['price_drop_alert', 'welcome', 'system'],
+      default: 'price_drop_alert',
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'processing', 'sent', 'failed'],
+      default: 'pending',
+      index: true,
+    },
+    recipient: { type: String, required: true },
+    subject: { type: String, required: true },
+    payload: {
+      itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item' },
+      itemTitle: { type: String },
+      itemUrl: { type: String },
+      itemImage: { type: String },
+      platform: { type: String },
+      baselinePrice: { type: Number },
+      currentPrice: { type: Number },
+      dropPercentage: { type: Number },
+      savings: { type: Number },
+    },
+    attempts: { type: Number, default: 0 },
+    maxAttempts: { type: Number, default: 3 },
+    lastError: { type: String, default: null },
+    queuedAt: { type: Date, default: Date.now },
+    sentAt: { type: Date, default: null },
+    messageId: { type: String, default: null },
+  },
+  { timestamps: true }
+);
+
 const UserSchema = new mongoose.Schema(
   {
     googleId: { type: String, required: true, unique: true, index: true },
@@ -32,6 +68,7 @@ const UserSchema = new mongoose.Schema(
       quietHoursEnd: { type: String, default: '' },   // e.g. "08:00"
     },
     trackedItems: [UserTrackedItemSchema],
+    mailQueue: [MailQueueItemSchema],
     extensionInstalled: { type: Boolean, default: false },
   },
   { timestamps: true }

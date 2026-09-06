@@ -5,6 +5,7 @@ import { UserModel } from '../models/User.js';
 import { scrapeProduct } from './scraper/index.js';
 import { calculateDropPercentage, shouldNotifyUser } from './priceEngine.js';
 import { sendPriceDropEmail } from './emailService.js';
+import { enqueueUserEmail, processUserMailQueue, processAllPendingMailQueues } from './mailQueueService.js';
 import { ENV } from '../config/env.js';
 
 let isPollerRunning = false;
@@ -223,24 +224,34 @@ export async function runPollerCycle(options = {}) {
 
             if (shouldNotify) {
               const dropPercent = calculateDropPercentage(baselinePrice, newPrice);
-              console.log(`[Poller] 📧 Triggering drop alert email to ${user.email} (-${dropPercent}%)`);
+              console.log(`[Poller] 📥 Enqueueing drop alert into user mail queue for ${user.email} (-${dropPercent}%)`);
 
               try {
-                await sendPriceDropEmail({
-                  user,
-                  item,
-                  dropPercentage: dropPercent,
-                  baselinePrice,
-                  currentPrice: newPrice,
+                await enqueueUserEmail(user._id, {
+                  type: 'price_drop_alert',
+                  subject: `📉 Price Drop Alert: ${item.title.slice(0, 50)}...`,
+                  payload: {
+                    itemId: item._id,
+                    itemTitle: item.title,
+                    itemUrl: item.url,
+                    itemImage: item.imageUrl,
+                    platform: item.platform,
+                    baselinePrice,
+                    currentPrice: newPrice,
+                    dropPercentage: dropPercent,
+                    savings: Math.max(0, baselinePrice - newPrice),
+                  },
                 });
-                alertsSent++;
-                tracking.lastNotifiedAt = new Date();
-                tracking.lastNotifiedPrice = newPrice;
-                await user.save();
-                debugLog(`Alert email successfully processed and tracking saved for ${user.email}.`);
-              } catch (mailErr) {
-                console.warn(`[Poller Warning] Failed to send email to ${user.email}: ${mailErr.message}`);
-                debugLog(`Email error stack:`, mailErr.stack);
+
+                // Process pending emails in the user's mailing queue
+                const queueResult = await processUserMailQueue(user._id);
+                if (queueResult.sent > 0) {
+                  alertsSent += queueResult.sent;
+                  console.log(`[Poller] 📧 Sent ${queueResult.sent} alert email(s) from user mail queue to ${user.email}`);
+                }
+              } catch (queueErr) {
+                console.warn(`[Poller Warning] Mail queue error for ${user.email}: ${queueErr.message}`);
+                debugLog(`Mail queue error stack:`, queueErr.stack);
               }
             } else {
               debugLog(`Notification conditions not met for ${user.email}. Skipping email.`);
@@ -268,6 +279,17 @@ export async function runPollerCycle(options = {}) {
         debugLog(`Polite pacing: sleeping for ${sleepMs}ms before next item...`);
         await sleep(sleepMs);
       }
+    }
+
+    // Sweep any pending/deferred mail queues across all users
+    try {
+      const sweep = await processAllPendingMailQueues();
+      if (sweep.totalSent > 0) {
+        alertsSent += sweep.totalSent;
+        console.log(`[Poller] 📬 Flushed pending user mail queues: sent ${sweep.totalSent} deferred alert(s).`);
+      }
+    } catch (sweepErr) {
+      debugLog('Pending queue sweep notice:', sweepErr.message);
     }
 
     const cycleDuration = parseFloat(((Date.now() - cycleStartTime) / 1000).toFixed(2));

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { UserModel } from '../models/User.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { getUserMailQueue, processUserMailQueue, retryFailedUserQueue } from '../services/mailQueueService.js';
 
 const router = Router();
 
@@ -94,6 +95,49 @@ router.post('/unsubscribe', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ error: 'Failed to process unsubscribe request' });
+  }
+});
+
+// GET /api/user/mail-queue — Inspect current user's mailing queue history and status
+router.get('/mail-queue', authMiddleware, async (req, res) => {
+  try {
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '50', 10)));
+    const queueData = await getUserMailQueue(req.user.userId, limit);
+    return res.json({
+      success: true,
+      ...queueData,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to fetch user mail queue', details: error.message });
+  }
+});
+
+// POST /api/user/mail-queue/process — Trigger immediate processing of pending mail queue
+router.post('/mail-queue/process', authMiddleware, async (req, res) => {
+  try {
+    const result = await processUserMailQueue(req.user.userId);
+    return res.json({
+      success: true,
+      message: `Processed ${result.processed} email(s): ${result.sent} sent, ${result.failed} failed.`,
+      result,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to process mail queue', details: error.message });
+  }
+});
+
+// POST /api/user/mail-queue/retry — Retry failed email alerts in user's queue
+router.post('/mail-queue/retry', authMiddleware, async (req, res) => {
+  try {
+    const { queueItemId } = req.body || {};
+    const result = await retryFailedUserQueue(req.user.userId, queueItemId);
+    return res.json({
+      success: true,
+      message: `Retried ${result.resetCount} failed email(s): ${result.sent} sent, ${result.failed} failed.`,
+      result,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to retry mail queue', details: error.message });
   }
 });
 
