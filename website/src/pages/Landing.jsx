@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useServerStatus } from '../context/ServerStatusContext.jsx';
 import {
   TrendingDown,
   ShieldCheck,
@@ -11,10 +12,12 @@ import {
   CheckCircle2,
   Sparkles,
   ShoppingBag,
+  AlertTriangle,
 } from 'lucide-react';
 
 export default function Landing() {
   const { isAuthenticated } = useAuth();
+  const { isServerDown } = useServerStatus();
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -23,6 +26,26 @@ export default function Landing() {
         <div className="absolute inset-0 -z-10 bg-[radial-gradient(45rem_50rem_at_top,theme(colors.indigo.100),theme(colors.white))] opacity-60" />
         
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          {isServerDown && (
+            <div className="mb-8 mx-auto max-w-2xl p-4 bg-amber-50 border border-amber-300 rounded-2xl flex flex-col sm:flex-row items-center justify-between text-left text-amber-900 shadow-sm gap-3">
+              <div className="flex items-center space-x-3">
+                <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                <div>
+                  <p className="font-bold text-sm">Server Down: Maintenance is going on, please contact user</p>
+                  <p className="text-xs text-amber-800">
+                    Live price tracking and API operations are paused during maintenance.
+                  </p>
+                </div>
+              </div>
+              <Link
+                to="/server-down"
+                className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold whitespace-nowrap transition shadow-xs"
+              >
+                View Status
+              </Link>
+            </div>
+          )}
+
           <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-semibold mb-8 shadow-xs">
             <Sparkles className="w-3.5 h-3.5" />
             <span>Automated E-Commerce Price Tracker for India</span>

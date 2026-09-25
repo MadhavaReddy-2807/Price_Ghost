@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useServerStatus } from '../context/ServerStatusContext.jsx';
 import {
   LayoutDashboard,
   Settings,
@@ -13,10 +14,12 @@ import {
   Copy,
   Check,
   ShieldCheck,
+  AlertTriangle,
 } from 'lucide-react';
 
 export default function Navbar() {
   const { user, token, isAuthenticated, logout } = useAuth();
+  const { isServerDown } = useServerStatus();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -58,6 +61,17 @@ export default function Navbar() {
                 </span>
               </div>
             </Link>
+
+            {isServerDown && (
+              <Link
+                to="/server-down"
+                className="ml-3 inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition animate-pulse"
+                title="Server is down for maintenance. Click to view status."
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-600" />
+                <span>Server Down</span>
+              </Link>
+            )}
 
             {/* Desktop Nav Links */}
             {isAuthenticated && (

@@ -107,6 +107,38 @@ app.get('/ping', (req, res) => {
   res.status(200).json({ pong: true, timestamp: new Date().toISOString() });
 });
 
+app.get('/api/ping', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.status(200).json({ pong: true, timestamp: new Date().toISOString() });
+});
+
+// Maintenance Mode Guard
+app.use((req, res, next) => {
+  // Always let preflight OPTIONS and health/ping endpoints through
+  if (
+    req.method === 'OPTIONS' ||
+    req.path === '/ping' ||
+    req.path === '/api/ping' ||
+    req.path.startsWith('/health') ||
+    req.path.startsWith('/api/health')
+  ) {
+    return next();
+  }
+
+  if (ENV.MAINTENANCE_MODE) {
+    return res.status(503).json({
+      error: 'Server Down',
+      message: 'Maintenance is going on, please contact user',
+      maintenance: true,
+      contact: ENV.ADMIN_EMAILS?.[0] || 'madhava2807@gmail.com',
+    });
+  }
+
+  next();
+});
+
 // Apply sliding-window rate limiters
 const apiLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
@@ -132,8 +164,10 @@ app.use('/api', (req, res, next) => {
 
   if (mongoose.connection.readyState !== 1) {
     return res.status(503).json({
-      error: 'Database Unavailable',
-      message: 'MongoDB connection is not established yet. Please verify MongoDB service or Atlas IP whitelist.',
+      error: 'Server Down',
+      message: 'Maintenance is going on, please contact user',
+      details: 'MongoDB connection is not established yet. Please verify MongoDB service or Atlas IP whitelist.',
+      contact: ENV.ADMIN_EMAILS?.[0] || 'madhava2807@gmail.com',
     });
   }
   next();

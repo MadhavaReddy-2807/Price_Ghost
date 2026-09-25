@@ -25,8 +25,11 @@ export function AuthProvider({ children }) {
             setUser(res.data.user);
             localStorage.setItem('price_ghost_user', JSON.stringify(res.data.user));
           }
-        } catch {
-          logout();
+        } catch (err) {
+          // Only log out on explicit 401 Unauthorized, never when server is down/offline
+          if (err.response?.status === 401) {
+            logout();
+          }
         }
       }
       setLoading(false);

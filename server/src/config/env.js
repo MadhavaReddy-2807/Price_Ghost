@@ -35,4 +35,5 @@ export const ENV = {
     .split(',')
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
+  MAINTENANCE_MODE: process.env.MAINTENANCE_MODE === 'true',
 };

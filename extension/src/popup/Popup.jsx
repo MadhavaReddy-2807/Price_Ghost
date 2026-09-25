@@ -33,6 +33,7 @@ export default function Popup() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlatform, setSelectedPlatform] = useState('all');
+  const [serverDown, setServerDown] = useState(false);
 
   // Active shopping tab product state
   const [currentPageProduct, setCurrentPageProduct] = useState(null);
@@ -196,14 +197,25 @@ export default function Popup() {
           if (e.status === 401) {
             handleLogout();
             setSyncMessage('⚠️ Session expired. Please sign in again.');
+          } else if (e.status === 502 || e.status === 503 || e.status === 504 || e.message?.includes('Failed to fetch')) {
+            setServerDown(true);
           }
           return null;
         }),
-        fetchTrackedItems().catch(() => []),
-        fetchDashboardSummary().catch(() => null),
+        fetchTrackedItems().catch((e) => {
+          if (e.status === 502 || e.status === 503 || e.status === 504) setServerDown(true);
+          return [];
+        }),
+        fetchDashboardSummary().catch((e) => {
+          if (e.status === 502 || e.status === 503 || e.status === 504) setServerDown(true);
+          return null;
+        }),
       ]);
 
-      if (profileRes?.user) setUser(profileRes.user);
+      if (profileRes?.user) {
+        setUser(profileRes.user);
+        setServerDown(false);
+      }
       if (Array.isArray(itemsRes)) {
         setItems(itemsRes);
         // Sync tracked keys into local storage for the in-page button
@@ -401,6 +413,22 @@ export default function Popup() {
           )}
         </div>
       </div>
+
+      {/* Server Down Banner */}
+      {serverDown && (
+        <div className="bg-amber-500 text-white px-3 py-2 text-xs flex items-center justify-between font-medium shadow-sm">
+          <div className="flex items-center space-x-1.5 flex-1 pr-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span className="leading-tight">Server Down: Maintenance is going on, please contact user</span>
+          </div>
+          <button
+            onClick={() => openLink(`${WEB_URL}/server-down`)}
+            className="underline hover:text-amber-100 whitespace-nowrap text-[11px] font-semibold"
+          >
+            Status
+          </button>
+        </div>
+      )}
 
       {/* Main Body */}
       {loading ? (

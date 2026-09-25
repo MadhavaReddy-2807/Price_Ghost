@@ -20,10 +20,40 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle 401 Unauthorized globally
+// Handle 401 Unauthorized globally and Server Down / Maintenance events
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // If request explicitly opts out of server down handling (e.g. ping health checks)
+    if (!error.config?.skipServerDownCheck) {
+      const isNetworkError =
+        !error.response &&
+        (error.code === 'ERR_NETWORK' ||
+          error.message === 'Network Error' ||
+          error.code === 'ECONNABORTED' ||
+          error.code === 'ECONNREFUSED');
+      const isServerDownStatus =
+        error.response && [502, 503, 504].includes(error.response.status);
+
+      if (isNetworkError || isServerDownStatus) {
+        const detail = {
+          isNetworkError,
+          status: error.response?.status || 'OFFLINE',
+          error: error.response?.data?.error || 'Server Down',
+          message:
+            error.response?.data?.message ||
+            'Maintenance is going on, please contact user',
+          timestamp: new Date().toISOString(),
+        };
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('price_ghost_server_down', { detail })
+          );
+        }
+      }
+    }
+
     if (error.response && error.response.status === 401) {
       // Clear token if expired
       localStorage.removeItem('price_ghost_token');
@@ -32,6 +62,22 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// Health & System API
+export const healthApi = {
+  checkHealth: (options = {}) =>
+    api.get('/health', {
+      skipServerDownCheck: true,
+      timeout: 5000,
+      ...options,
+    }),
+  ping: (options = {}) =>
+    api.get('/ping', {
+      skipServerDownCheck: true,
+      timeout: 4000,
+      ...options,
+    }),
+};
 
 // Auth API
 export const authApi = {

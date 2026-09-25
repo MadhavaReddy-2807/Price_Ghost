@@ -65,8 +65,9 @@
 * **Mail Queue Manager**: Inspect global queue counts, tune background worker sweep frequency, and execute emergency flushes.
 
 ### 🩺 Health & Observability
-* **Liveness & Readiness**: `/api/health/live`, `/api/health/ready`, and lightweight `/ping`.
+* **Liveness & Readiness**: `/api/health/live`, `/api/health/ready`, and lightweight `/ping` & `/api/ping`.
 * **Deep Upstream Inspection**: `/api/health/upstream` probes MongoDB latency, scraper reachability, SMTP transport, and process memory.
+* **Server Down & Maintenance Page**: Dedicated `/server-down` page (`ServerDown.jsx`) triggered when the backend is offline, unreachable (Network Error, 502/503/504), or under scheduled maintenance (`MAINTENANCE_MODE=true`). Features real-time health pinging, auto-retry countdown, diagnostic inspector, and direct administrator contact (`madhava2807@gmail.com`). Automatically restores navigation when services return online.
 
 ---
 

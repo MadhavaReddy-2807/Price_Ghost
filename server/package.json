@@ -13,6 +13,7 @@
     "test:queue": "node src/test_mail_queue.js",
     "test:schedule": "node src/scripts/test_mailing_schedules.js",
     "test:admin": "node src/test_admin.js",
+    "test:maintenance": "node src/test_server_down.js",
     "simulate:drop": "node src/scripts/simulate_drop.js"
   },
   "dependencies": {
